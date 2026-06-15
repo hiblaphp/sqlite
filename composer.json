@@ -1,0 +1,17 @@
+{
+    "name": "hiblaphp/sqlite",
+    "description": "Non Blocking Sqlite3 Client",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Hibla\\Sqlite\\": "src/"
+        }
+    },
+    "minimum-stability": "dev",
+    "require": {
+       "hiblaphp/parallel": "^1.0",
+       "hiblaphp/sql": "^1.0",
+       "hiblaphp/cache": "^1.0"
+    }
+}
