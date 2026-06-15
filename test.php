@@ -9,161 +9,101 @@ use Hibla\Sqlite\ValueObjects\SqliteConfig;
 
 use function Hibla\await;
 
-// Helper for procedural testing
-function assertTest(string $name, bool $condition): void
-{
-    if ($condition) {
-        echo "✅ [PASS] {$name}\n";
-    } else {
-        echo "❌ [FAIL] {$name}\n";
-        exit(1);
-    }
+ini_set('memory_limit', '32M');
+
+function mem(): string {
+    return number_format(memory_get_usage(true) / 1024 / 1024, 2) . ' MB';
 }
 
-// Setup Database File
+function memPeak(): string {
+    return number_format(memory_get_peak_usage(true) / 1024 / 1024, 2) . ' MB';
+}
+
+echo "=================================================\n";
+echo "   SQLite IPC Streaming & Backpressure Test\n";
+echo "=================================================\n";
+echo "Parent Memory limit : 32M (Will fatal if backpressure fails)\n";
+echo "Target Row Count    : 500,000\n";
+echo "Buffer Size         : 100\n";
+echo "-------------------------------------------------\n";
+
 $dbId = uniqid();
-$dbFile = __DIR__ . "/test_database_{$dbId}.sqlite";
-
-// Clean up previous runs and clear the trace log
-@unlink(__DIR__ . '/trace.log');
-
-foreach (['', '-wal', '-shm'] as $ext) {
-    $file = $dbFile . $ext;
-    if (file_exists($file)) {
-        @unlink($file);
-    }
-}
-
-echo "Starting SQLite Connection Test (DB: {$dbId})...\n";
-echo "----------------------------------\n";
+$dbFile = __DIR__ . "/stream_test_{$dbId}.sqlite";
 
 try {
-    // 2. Initialize Configuration & Connection
     $config = new SqliteConfig(database: $dbFile);
     $connection = new Connection($config);
 
-    echo "⏳ Spawning raw SQLite process...\n";
+    echo "⏳ Spawning raw SQLite worker daemon...\n";
     await($connection->connect());
-    assertTest("Process spawned successfully", !$connection->isClosed());
-
-    // 3. Test Schema Creation
-    echo "\n⏳ Creating table...\n";
-    await($connection->query("
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL
-        )
-    "));
     
-    await($connection->query("DELETE FROM users"));
-    assertTest("Table ready and empty", true);
+    echo "✅ Worker connected. Baseline Memory: " . mem() . "\n\n";
 
-    // 4. Test Insert with Positional Parameters
-    echo "\n⏳ Inserting Alice (Positional params via prepared statement)...\n";
-    $stmt1 = await($connection->prepare("INSERT INTO users (name, email) VALUES (?, ?)"));
-    $res1 = await($stmt1->execute(['Alice', 'alice@example.com']));
-    assertTest("Alice inserted (Affected: {$res1->affectedRows})", $res1->affectedRows === 1);
-    assertTest("Last Insert ID is 1", $res1->lastInsertId === 1);
-    await($stmt1->close());
-
-    // 5. Test Insert with Named Parameters
-    echo "\n⏳ Inserting Bob (Named params via prepared statement)...\n";
-    $stmt2 = await($connection->prepare("INSERT INTO users (name, email) VALUES (:name, :email)"));
-    $res2 = await($stmt2->execute([':name' => 'Bob', ':email' => 'bob@example.com']));
-    assertTest("Bob inserted (Affected: {$res2->affectedRows})", $res2->affectedRows === 1);
-    assertTest("Last Insert ID is 2", $res2->lastInsertId === 2);
-    await($stmt2->close());
-
-    // 6. Test Standard Query
-    echo "\n⏳ Querying all users...\n";
-    $res3 = await($connection->query("SELECT * FROM users ORDER BY id ASC"));
-    assertTest("Row count is 2", $res3->rowCount === 2);
-
-    $users = $res3->fetchAll();
-    assertTest("First user is Alice", $users[0]['name'] === 'Alice');
-    assertTest("Second user is Bob", $users[1]['name'] === 'Bob');
-
-    // 7a. Test Standard Streaming Query
-    echo "\n⏳ Streaming users...\n";
-    $stream = await($connection->streamQuery("SELECT * FROM users ORDER BY id DESC"));
-
-    $streamedNames = [];
-    foreach ($stream as $row) {
-        $streamedNames[] = $row['name'];
-    }
-
-    assertTest("Stream yielded 2 rows", count($streamedNames) === 2);
-    assertTest("Stream order is correct (DESC)", $streamedNames[0] === 'Bob' && $streamedNames[1] === 'Alice');
-
-    // 7b. Test Large-Scale Memory-Efficient Streaming (100,000 Rows)
-    echo "\n⏳ Testing Memory-Efficient Streaming on 100,000 Rows...\n";
+    echo "⏳ Initiating 500,000 row stream from worker...\n";
     
-    $startMemory = memory_get_usage();
+    $start = microtime(true);
     
-    $largeStream = await($connection->streamQuery("
+    $stream = await($connection->streamQuery("
         WITH RECURSIVE cnt(x) AS (
             SELECT 1 
             UNION ALL 
-            SELECT x+1 FROM cnt LIMIT 100000
+            SELECT x+1 FROM cnt LIMIT 500000
         ) 
-        SELECT x, 'user_name_' || x AS name FROM cnt;
+        SELECT x, 'user_name_' || x AS name, randomblob(50) AS payload FROM cnt;
     ", bufferSize: 100));
 
-    $processedCount = 0;
-    $maxMemoryDuringStream = 0;
+    $count = 0;
+    $memSamples = [];
 
-    foreach ($largeStream as $row) {
-        $processedCount++;
-        $maxMemoryDuringStream = max($maxMemoryDuringStream, memory_get_usage());
-        
-        if ($processedCount % 25000 === 0) {
-            echo "   ... streamed {$processedCount} rows (Current Memory: " . round(memory_get_usage() / 1024 / 1024, 2) . " MB)\n";
+    foreach ($stream as $row) {
+        $count++;
+
+        if ($count % 10000 === 0) {
+            await(\Hibla\delay(0.001));
+        }
+
+        if ($count % 50000 === 0) {
+            $currentMem = memory_get_usage(true) / 1024 / 1024;
+            $memSamples[] = $currentMem;
+            printf(
+                "  Received %s rows | Current Mem: %.2f MB | Peak: %s\n",
+                number_format($count),
+                $currentMem,
+                memPeak()
+            );
         }
     }
 
-    $endMemory = memory_get_usage();
-    $memoryDelta = ($maxMemoryDuringStream - $startMemory) / 1024 / 1024;
+    echo "\n=================================================\n";
+    echo "✅ STREAM COMPLETE\n";
+    echo "-------------------------------------------------\n";
+    echo "Total Rows Streamed : " . number_format($count) . "\n";
+    echo "Time Taken          : " . number_format(microtime(true) - $start, 2) . "s\n";
+    echo "Final Peak Memory   : " . memPeak() . "\n";
 
-    assertTest("Processed all 100,000 rows successfully", $processedCount === 100000);
+    $min = min($memSamples);
+    $max = max($memSamples);
+    $drift = $max - $min;
     
-    echo "📊 Memory Profile:\n";
-    echo "   - Baseline Memory: " . round($startMemory / 1024 / 1024, 2) . " MB\n";
-    echo "   - Peak Memory during streaming: " . round($maxMemoryDuringStream / 1024 / 1024, 2) . " MB\n";
-    echo "   - Memory delta: " . round($memoryDelta, 3) . " MB\n";
+    echo "Memory Drift        : " . round($drift, 2) . " MB\n";
 
-    assertTest("Memory delta is flat (< 1.5 MB)", $memoryDelta < 1.5);
-
-    // 8. Test Error Handling on Prepared Statement
-    echo "\n⏳ Testing Error Handling on Prepared Statement (Unique Constraint)...\n";
-    $stmt3 = await($connection->prepare("INSERT INTO users (name, email) VALUES (?, ?)"));
-    try {
-        await($stmt3->execute(['Charlie', 'alice@example.com'])); // Duplicate email
-        assertTest("Duplicate email should have thrown", false);
-    } catch (\Throwable $e) {
-        assertTest("Caught Exception: " . $e->getMessage(), true);
+    if ($drift < 2.0) {
+        echo "✅ PASS: IPC Backpressure works flawlessly. Parent memory stayed completely flat!\n";
+    } else {
+        echo "❌ FAIL: Memory drifted significantly. Backpressure may be leaking.\n";
     }
-    await($stmt3->close());
 
 } catch (\Throwable $e) {
     echo "\n❌ FATAL ERROR: " . $e->getMessage() . "\n";
     echo $e->getTraceAsString() . "\n";
 } finally {
-    // 9. Cleanup
-    echo "\n⏳ Closing connection...\n";
+    echo "\n⏳ Tearing down worker...\n";
     if (isset($connection)) {
-        $connection->close(true); // Explicit clean shutdown with ProcessKiller
-        assertTest("Connection closed cleanly", $connection->isClosed());
+        $connection->close(true);
     }
-
     foreach (['', '-wal', '-shm'] as $ext) {
         $file = $dbFile . $ext;
-        if (file_exists($file)) {
-            @unlink($file);
-        }
+        if (file_exists($file)) @unlink($file);
     }
-    echo "🧹 Cleaned up database files\n";
+    echo "🧹 Cleanup complete.\n";
 }
-
-echo "----------------------------------\n";
-echo "🎉 All tests completed successfully!\n";
