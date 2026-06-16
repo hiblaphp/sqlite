@@ -4,18 +4,18 @@ declare(strict_types=1);
 
 namespace Hibla\Sqlite\Internals;
 
-use Hibla\Parallel\Utilities\ProcessKiller;
-use Hibla\Parallel\Utilities\SystemUtilities;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
 use Hibla\Sql\Exceptions\ConnectionException;
 use Hibla\Sql\Exceptions\ConstraintViolationException;
 use Hibla\Sql\Exceptions\LockWaitTimeoutException;
 use Hibla\Sql\Exceptions\QueryException;
+use Hibla\Sqlite\Utilities\SystemHelper;
 use Hibla\Sqlite\ValueObjects\CommandRequest;
 use Hibla\Sqlite\ValueObjects\SqliteConfig;
 use Hibla\Stream\PromiseReadableStream;
 use Hibla\Stream\PromiseWritableStream;
+use Rcalicdan\ProcessKiller\ProcessKiller;
 use SplQueue;
 
 use function Hibla\async;
@@ -41,7 +41,7 @@ final class Connection
     public function __construct(
         private readonly SqliteConfig $config
     ) {
-        SystemUtilities::validateEnvironment();
+        SystemHelper::validateEnvironment();
         $this->commandQueue = new SplQueue();
     }
 
@@ -57,8 +57,8 @@ final class Connection
 
         async(function () use ($promise) {
             try {
-                $phpBinary = SystemUtilities::getPhpBinary();
-                $autoload = SystemUtilities::findAutoloadPath();
+                $phpBinary = SystemHelper::getPhpBinary();
+                $autoload = SystemHelper::getAutoloadPath();
                 $configSerialized = base64_encode(serialize($this->config));
                 $workerScript = __DIR__ . '/worker.php';
 
@@ -237,7 +237,6 @@ final class Connection
         }
 
         if (\is_resource($this->processResource)) {
-            @\proc_terminate($this->processResource);
             @\proc_close($this->processResource);
             $this->processResource = null;
         }
