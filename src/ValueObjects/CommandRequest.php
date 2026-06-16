@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Hibla\Sqlite\ValueObjects;
 
 use Hibla\Promise\Promise;
+use Hibla\Sqlite\Internals\SqliteRowStream;
 
 /**
  * @internal
@@ -21,7 +22,7 @@ final class CommandRequest
         public Promise $promise,
         public string $sql,
         public array $params = [],
-        public ?object $streamContext = null,
+        public ?SqliteRowStream $streamContext = null,
         public string $id = '',
     ) {
         if ($this->id === '') {

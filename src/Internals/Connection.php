@@ -7,9 +7,8 @@ namespace Hibla\Sqlite\Internals;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
 use Hibla\Sql\Exceptions\ConnectionException;
-use Hibla\Sql\Exceptions\ConstraintViolationException;
-use Hibla\Sql\Exceptions\LockWaitTimeoutException;
-use Hibla\Sql\Exceptions\QueryException;
+use Hibla\Sqlite\Handlers\QueryHandler;
+use Hibla\Sqlite\Handlers\StreamHandler;
 use Hibla\Sqlite\Utilities\SystemHelper;
 use Hibla\Sqlite\ValueObjects\CommandRequest;
 use Hibla\Sqlite\ValueObjects\SqliteConfig;
@@ -28,28 +27,43 @@ final class Connection
 {
     /** @var resource|null */
     private $processResource = null;
-    
+
     private ?PromiseWritableStream $stdin = null;
     private ?PromiseReadableStream $stdout = null;
     private SplQueue $commandQueue;
     private ?CommandRequest $currentCommand = null;
     private bool $closed = false;
     private int $pid = 0;
+
+    // Cooperative suspension properties
     private bool $paused = false;
     private ?Promise $pausePromise = null;
 
-    public function __construct(
-        private readonly SqliteConfig $config
-    ) {
+    private readonly SqliteConfig $config;
+    private readonly QueryHandler $queryHandler;
+    private readonly StreamHandler $streamHandler;
+
+    public function __construct(SqliteConfig|array|string $config)
+    {
         SystemHelper::validateEnvironment();
+
+        $this->config = match (true) {
+            $config instanceof SqliteConfig => $config,
+            \is_array($config) => SqliteConfig::fromArray($config),
+            \is_string($config) => SqliteConfig::fromUri($config),
+        };
+
         $this->commandQueue = new SplQueue();
+        $this->queryHandler = new QueryHandler($this);
+        $this->streamHandler = new StreamHandler($this);
     }
 
-    /**
-     * Spawns a raw PHP SQLite daemon directly, bypassing closure-serialization overhead.
-     * 
-     * @return PromiseInterface<self>
-     */
+    public static function create(SqliteConfig|array|string $config): PromiseInterface
+    {
+        $connection = new self($config);
+        return $connection->connect();
+    }
+
     public function connect(): PromiseInterface
     {
         /** @var Promise<self> $promise */
@@ -104,30 +118,33 @@ final class Connection
     }
 
     /**
-     * Executes a standard SQL query (buffered, parameterless).
-     * 
-     * @return PromiseInterface<Result>
+     * Safely writes a payload to the worker daemon. Handles crashes natively.
      */
+    public function writeIpc(string $payload): void
+    {
+        if ($this->isClosed() || $this->stdin === null) {
+            return;
+        }
+
+        async(function () use ($payload): void {
+            try {
+                await($this->stdin->writeAsync($payload));
+            } catch (\Throwable $e) {
+                $this->handleCrash(new ConnectionException('Failed to write command to SQLite IPC pipe.', 0, $e));
+            }
+        });
+    }
+
     public function query(string $sql): PromiseInterface
     {
         return $this->enqueueCommand(CommandRequest::TYPE_QUERY, $sql);
     }
 
-    /**
-     * Streams a standard SELECT query row-by-row.
-     * 
-     * @return PromiseInterface<SqliteRowStream>
-     */
     public function streamQuery(string $sql, int $bufferSize = 100): PromiseInterface
     {
         return $this->enqueueCommand(CommandRequest::TYPE_STREAM_QUERY, $sql, [], $bufferSize);
     }
 
-    /**
-     * Prepares a SQL statement. Compiles the named-parameter bindings on the client-side.
-     * 
-     * @return PromiseInterface<PreparedStatement>
-     */
     public function prepare(string $sql): PromiseInterface
     {
         if ($this->isClosed()) {
@@ -138,77 +155,46 @@ final class Connection
         return Promise::resolved($stmt);
     }
 
-    /**
-     * Executes a prepared statement with parameters.
-     * 
-     * @return PromiseInterface<Result>
-     */
     public function executeStatement(PreparedStatement $stmt, array $params): PromiseInterface
     {
         return $this->enqueueCommand(CommandRequest::TYPE_EXECUTE, $stmt->parsedSql, $params);
     }
 
-    /**
-     * Executes a prepared statement and streams the results.
-     * 
-     * @return PromiseInterface<SqliteRowStream>
-     */
     public function executeStream(PreparedStatement $stmt, array $params, int $bufferSize = 100): PromiseInterface
     {
         return $this->enqueueCommand(CommandRequest::TYPE_EXECUTE_STREAM, $stmt->parsedSql, $params, $bufferSize);
     }
 
-    /**
-     * Pauses the connection read loop.
-     */
     public function pause(): void
     {
         if ($this->paused) return;
-
         $this->paused = true;
         $this->pausePromise = new Promise();
     }
 
-    /**
-     * Resumes the connection read loop.
-     */
     public function resume(): void
     {
         if (!$this->paused) return;
-
         $this->paused = false;
-
         if ($this->pausePromise !== null) {
             $this->pausePromise->resolve(null);
             $this->pausePromise = null;
         }
     }
 
-    /**
-     * Performs a fast, non-blocking check to verify the child process is alive and responsive.
-     * 
-     * @return PromiseInterface<bool>
-     */
     public function ping(): PromiseInterface
     {
         if ($this->isClosed()) {
             return Promise::rejected(new ConnectionException('Connection is closed.'));
         }
-
-        return $this->query('SELECT 1')->then(static fn () => true);
+        return $this->query('SELECT 1')->then(static fn() => true);
     }
 
-    /**
-     * Resets the connection state.
-     * 
-     * @return PromiseInterface<bool>
-     */
     public function reset(): PromiseInterface
     {
         if ($this->isClosed()) {
             return Promise::rejected(new ConnectionException('Connection is closed.'));
         }
-
         return Promise::resolved(true);
     }
 
@@ -266,16 +252,17 @@ final class Connection
         }
 
         $promise = new Promise();
+
         $request = new CommandRequest($type, $promise, $sql, $params);
 
         $isStream = ($type === CommandRequest::TYPE_STREAM_QUERY || $type === CommandRequest::TYPE_EXECUTE_STREAM);
         if ($isStream && $bufferSize !== null) {
             $stream = new SqliteRowStream($bufferSize, $promise);
-            
+
             $stream->backpressureHandler = function (bool $shouldPause): void {
                 $shouldPause ? $this->pause() : $this->resume();
             };
-            
+
             $request->streamContext = $stream;
             $promise->resolve($stream);
         }
@@ -298,7 +285,7 @@ final class Connection
         }
 
         if ($this->currentCommand === $request && $this->config->killWorkerOnCancel) {
-            $this->close(true); 
+            $this->close(true);
         }
     }
 
@@ -310,27 +297,14 @@ final class Connection
 
         $this->currentCommand = $this->commandQueue->dequeue();
 
-        async(function (): void {
-            if ($this->isClosed() || $this->stdin === null) {
-                return;
-            }
+        $cmdType = $this->currentCommand->type;
+        $isStream = ($cmdType === CommandRequest::TYPE_STREAM_QUERY || $cmdType === CommandRequest::TYPE_EXECUTE_STREAM);
 
-            $cmd = $this->currentCommand->type;
-            $isStream = ($cmd === CommandRequest::TYPE_STREAM_QUERY || $cmd === CommandRequest::TYPE_EXECUTE_STREAM);
-
-            $payload = \json_encode([
-                'id' => $this->currentCommand->id,
-                'cmd' => $isStream ? 'stream' : 'query',
-                'sql' => $this->currentCommand->sql,
-                'params' => $this->currentCommand->params,
-            ], JSON_UNESCAPED_SLASHES);
-
-            try {
-                await($this->stdin->writeAsync($payload . "\n"));
-            } catch (\Throwable $e) {
-                $this->handleCrash(new ConnectionException('Failed to write command to SQLite IPC pipe.', 0, $e));
-            }
-        });
+        if ($isStream) {
+            $this->streamHandler->start($this->currentCommand);
+        } else {
+            $this->queryHandler->start($this->currentCommand);
+        }
     }
 
     private function startReadLoop(): void
@@ -344,15 +318,27 @@ final class Connection
                     if ($line === '') continue;
 
                     $response = \json_decode($line, true);
-                    
+
                     if (!\is_array($response)) {
                         throw new ConnectionException(
-                            "Invalid JSON received from SQLite worker: " . \json_last_error_msg() . 
-                            " | Payload: " . \substr($line, 0, 200)
+                            "Invalid JSON received from SQLite worker: " . \json_last_error_msg() .
+                                " | Payload: " . \substr($line, 0, 200)
                         );
                     }
 
-                    $this->handleResponse($response);
+                    if ($this->currentCommand !== null && isset($response['id']) && $response['id'] === $this->currentCommand->id) {
+                        $cmdType = $this->currentCommand->type;
+                        $isStream = ($cmdType === CommandRequest::TYPE_STREAM_QUERY || $cmdType === CommandRequest::TYPE_EXECUTE_STREAM);
+
+                        $isFinished = $isStream
+                            ? $this->streamHandler->handleResponse($response, $this->currentCommand)
+                            : $this->queryHandler->handleResponse($response, $this->currentCommand);
+
+                        if ($isFinished) {
+                            $this->currentCommand = null;
+                            $this->processNextCommand();
+                        }
+                    }
 
                     if ($this->paused && $this->pausePromise !== null) {
                         await($this->pausePromise);
@@ -364,59 +350,6 @@ final class Connection
                 $this->handleCrash(new ConnectionException('SQLite process stream closed.'));
             }
         });
-    }
-
-    private function handleResponse(array $response): void
-    {
-        if ($this->currentCommand === null || $response['id'] !== $this->currentCommand->id) {
-            return;
-        }
-
-        $cmd = $this->currentCommand;
-
-        if ($response['status'] === 'ERROR') {
-            $exception = $this->mapException($response['errorCode'], $response['errorMessage']);
-            if ($cmd->streamContext instanceof SqliteRowStream) {
-                $cmd->streamContext->error($exception);
-            }
-            $cmd->promise->reject($exception);
-            $this->finishCommand();
-            return;
-        }
-
-        if ($response['status'] === 'ROW') {
-            if ($cmd->streamContext instanceof SqliteRowStream) {
-                $cmd->streamContext->push($response['row']);
-            }
-            return;
-        }
-
-        if ($response['status'] === 'COMPLETED') {
-            $isStream = ($cmd->type === CommandRequest::TYPE_STREAM_QUERY || $cmd->type === CommandRequest::TYPE_EXECUTE_STREAM);
-            
-            if ($isStream) {
-                if ($cmd->streamContext instanceof SqliteRowStream) {
-                    $cmd->streamContext->complete();
-                }
-                if (!$cmd->promise->isSettled()) {
-                    $cmd->promise->resolve($cmd->streamContext);
-                }
-            } else {
-                $result = new Result(
-                    affectedRows: $response['result']['affectedRows'] ?? 0,
-                    lastInsertId: $response['result']['lastInsertId'] ?? 0,
-                    rows: $response['result']['rows'] ?? []
-                );
-                $cmd->promise->resolve($result);
-            }
-            $this->finishCommand();
-        }
-    }
-
-    private function finishCommand(): void
-    {
-        $this->currentCommand = null;
-        $this->processNextCommand();
     }
 
     private function handleCrash(\Throwable $e): void
@@ -441,7 +374,7 @@ final class Connection
         }
 
         if ($this->currentCommand !== null) {
-            if ($this->currentCommand->streamContext instanceof SqliteRowStream) {
+            if ($this->currentCommand->streamContext !== null) {
                 $this->currentCommand->streamContext->error($e);
             }
             $this->currentCommand->promise->reject($e);
@@ -453,7 +386,7 @@ final class Connection
 
     private function rejectQueue(\Throwable $e): void
     {
-        while (!$this->commandQueue->isEmpty()) {
+        while (! $this->commandQueue->isEmpty()) {
             $cmd = $this->commandQueue->dequeue();
             $cmd->promise->reject($e);
         }
@@ -464,7 +397,7 @@ final class Connection
         $found = false;
         $temp = new SplQueue();
 
-        while (!$this->commandQueue->isEmpty()) {
+        while (! $this->commandQueue->isEmpty()) {
             $cmd = $this->commandQueue->dequeue();
             if ($cmd === $request) {
                 $found = true;
@@ -475,15 +408,6 @@ final class Connection
 
         $this->commandQueue = $temp;
         return $found;
-    }
-
-    private function mapException(int $code, string $message): \Throwable
-    {
-        return match ($code) {
-            19 => new ConstraintViolationException($message, $code), 
-            5 => new LockWaitTimeoutException($message, $code),      
-            default => new QueryException($message, $code),
-        };
     }
 
     public function __destruct()
