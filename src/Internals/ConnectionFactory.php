@@ -16,8 +16,9 @@ final class ConnectionFactory
 {
     /**
      * Creates the optimal connection type based on environment capabilities.
-     * 
+     *
      * @param SqliteConfig|array<string, mixed>|string $config
+     *
      * @return PromiseInterface<ConnectionInterface>
      */
     public static function create(SqliteConfig|array|string $config): PromiseInterface
@@ -28,7 +29,7 @@ final class ConnectionFactory
             \is_string($config) => SqliteConfig::fromUri($config),
         };
 
-        if ($configObj->forceSync || !SystemHelper::isAsyncSupported()) {
+        if ($configObj->forceSync || ! SystemHelper::isAsyncSupported()) {
             $conn = new SyncConnection($configObj);
         } else {
             $conn = new AsyncConnection($configObj);

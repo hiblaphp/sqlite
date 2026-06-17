@@ -12,12 +12,13 @@ use Hibla\Sqlite\ValueObjects\SqliteConfig;
 
 /**
  * Fallback connection that executes SQLite commands synchronously in the main thread.
- * 
+ *
  * @internal
  */
 final class SyncConnection implements ConnectionInterface
 {
     private ?\SQLite3 $db = null;
+
     private bool $closed = true;
 
     public function __construct(
@@ -35,11 +36,12 @@ final class SyncConnection implements ConnectionInterface
             $this->db->enableExceptions(true);
             $this->db->busyTimeout($this->config->busyTimeout);
             $this->db->exec("PRAGMA journal_mode = {$this->config->journalMode}");
-            
+
             $fkFlag = $this->config->foreignKeys ? 'ON' : 'OFF';
             $this->db->exec("PRAGMA foreign_keys = {$fkFlag}");
-            
+
             $this->closed = false;
+
             return Promise::resolved($this);
         } catch (\Throwable $e) {
             return Promise::rejected(ExceptionMapper::map((int) $e->getCode(), $e->getMessage()));
@@ -77,6 +79,7 @@ final class SyncConnection implements ConnectionInterface
             return Promise::resolved(new Result(
                 affectedRows: $this->db->changes(),
                 lastInsertId: $this->db->lastInsertRowID(),
+                connectionId: spl_object_id($this),
                 rows: $rows
             ));
         } catch (\Throwable $e) {
@@ -86,7 +89,7 @@ final class SyncConnection implements ConnectionInterface
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @return PromiseInterface<SyncRowStream>
      */
     public function streamQuery(string $sql, int $bufferSize = 100): PromiseInterface
@@ -100,6 +103,7 @@ final class SyncConnection implements ConnectionInterface
             if ($result === false) {
                 throw new \RuntimeException('Query failed.');
             }
+
             return Promise::resolved(new SyncRowStream($result));
         } catch (\Throwable $e) {
             return Promise::rejected(ExceptionMapper::map((int) $e->getCode(), $e->getMessage()));
@@ -114,6 +118,7 @@ final class SyncConnection implements ConnectionInterface
         if ($this->closed) {
             return Promise::rejected(ExceptionMapper::map(0, 'Connection closed.'));
         }
+
         return Promise::resolved(new PreparedStatement($this, $sql));
     }
 
@@ -147,6 +152,7 @@ final class SyncConnection implements ConnectionInterface
             return Promise::resolved(new Result(
                 affectedRows: $this->db->changes(),
                 lastInsertId: $this->db->lastInsertRowID(),
+                connectionId: spl_object_id($this),
                 rows: $rows
             ));
         } catch (\Throwable $e) {
@@ -156,7 +162,7 @@ final class SyncConnection implements ConnectionInterface
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @return PromiseInterface<SyncRowStream>
      */
     public function executeStream(PreparedStatement $stmt, array $params, int $bufferSize = 100): PromiseInterface
@@ -205,7 +211,7 @@ final class SyncConnection implements ConnectionInterface
      */
     public function close(bool $killProcess = true): void
     {
-        if (!$this->closed && $this->db !== null) {
+        if (! $this->closed && $this->db !== null) {
             $this->db->close();
             $this->db = null;
         }
@@ -223,12 +229,16 @@ final class SyncConnection implements ConnectionInterface
     /**
      * {@inheritDoc}
      */
-    public function pause(): void {}
+    public function pause(): void
+    {
+    }
 
     /**
      * {@inheritDoc}
      */
-    public function resume(): void {}
+    public function resume(): void
+    {
+    }
 
     /**
      * @param array<int|string, mixed> $params

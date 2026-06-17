@@ -40,16 +40,16 @@ final class SyncRowStream implements RowStreamInterface
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @return \Generator<int, array<string, mixed>>
      */
     public function getIterator(): \Generator
     {
-        while (!$this->cancelled && ($row = $this->result->fetchArray(SQLITE3_ASSOC)) !== false) {
+        while (! $this->cancelled && ($row = $this->result->fetchArray(SQLITE3_ASSOC)) !== false) {
             yield $row;
         }
 
-        if (!$this->cancelled) {
+        if (! $this->cancelled) {
             $this->result->finalize();
         }
     }
@@ -64,7 +64,7 @@ final class SyncRowStream implements RowStreamInterface
         }
 
         $this->cancelled = true;
-        @$this->result->finalize(); 
+        @$this->result->finalize();
     }
 
     /**

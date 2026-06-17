@@ -26,10 +26,13 @@ use function Hibla\await;
  */
 final class AsyncConnection implements ConnectionInterface
 {
-    /** @var resource|null */
+    /**
+     * @var resource|null
+     */
     private $processResource = null;
 
     private ?PromiseWritableStream $stdin = null;
+
     private ?PromiseReadableStream $stdout = null;
 
     /**
@@ -38,8 +41,11 @@ final class AsyncConnection implements ConnectionInterface
     private SplQueue $commandQueue;
 
     private ?CommandRequest $currentCommand = null;
+
     private bool $closed = false;
+
     private int $pid = 0;
+
     private bool $paused = false;
 
     /**
@@ -48,7 +54,9 @@ final class AsyncConnection implements ConnectionInterface
     private ?Promise $pausePromise = null;
 
     private readonly SqliteConfig $config;
+
     private readonly ConnectionQueryHandler $queryHandler;
+
     private readonly ConnectionStreamHandler $streamHandler;
 
     /**
@@ -99,7 +107,7 @@ final class AsyncConnection implements ConnectionInterface
                 $pipes = [];
                 $process = @\proc_open($command, $descriptorSpec, $pipes, null, null, $options);
 
-                if (!\is_resource($process)) {
+                if (! \is_resource($process)) {
                     throw new ConnectionException('Failed to spawn raw SQLite process.');
                 }
 
@@ -155,7 +163,7 @@ final class AsyncConnection implements ConnectionInterface
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @return PromiseInterface<SqliteRowStream>
      */
     public function streamQuery(string $sql, int $bufferSize = 100): PromiseInterface
@@ -174,6 +182,7 @@ final class AsyncConnection implements ConnectionInterface
         }
 
         $stmt = new PreparedStatement($this, $sql);
+
         return Promise::resolved($stmt);
     }
 
@@ -188,7 +197,7 @@ final class AsyncConnection implements ConnectionInterface
 
     /**
      * {@inheritDoc}
-     * 
+     *
      * @return PromiseInterface<SqliteRowStream>
      */
     public function executeStream(PreparedStatement $stmt, array $params, int $bufferSize = 100): PromiseInterface
@@ -202,7 +211,9 @@ final class AsyncConnection implements ConnectionInterface
      */
     public function pause(): void
     {
-        if ($this->paused) return;
+        if ($this->paused) {
+            return;
+        }
         $this->paused = true;
         $this->pausePromise = new Promise();
     }
@@ -212,7 +223,9 @@ final class AsyncConnection implements ConnectionInterface
      */
     public function resume(): void
     {
-        if (!$this->paused) return;
+        if (! $this->paused) {
+            return;
+        }
         $this->paused = false;
         if ($this->pausePromise !== null) {
             $this->pausePromise->resolve(null);
@@ -228,8 +241,9 @@ final class AsyncConnection implements ConnectionInterface
         if ($this->isClosed()) {
             return Promise::rejected(new ConnectionException('Connection is closed.'));
         }
+
         /** @var PromiseInterface<bool> */
-        return $this->query('SELECT 1')->then(static fn() => true);
+        return $this->query('SELECT 1')->then(static fn () => true);
     }
 
     /**
@@ -240,6 +254,7 @@ final class AsyncConnection implements ConnectionInterface
         if ($this->isClosed()) {
             return Promise::rejected(new ConnectionException('Connection is closed.'));
         }
+
         return Promise::resolved(true);
     }
 
@@ -248,7 +263,9 @@ final class AsyncConnection implements ConnectionInterface
      */
     public function close(bool $killProcess = true): void
     {
-        if ($this->closed) return;
+        if ($this->closed) {
+            return;
+        }
 
         $this->closed = true;
 
@@ -288,6 +305,7 @@ final class AsyncConnection implements ConnectionInterface
 
     /**
      * @param array<int|string, mixed> $params
+     *
      * @return PromiseInterface<mixed>
      */
     private function enqueueCommand(string $type, string $sql, array $params = [], ?int $bufferSize = null): PromiseInterface
@@ -326,6 +344,7 @@ final class AsyncConnection implements ConnectionInterface
     {
         if ($this->removeFromQueue($request)) {
             $request->promise->reject(new \Hibla\Promise\Exceptions\CancelledException('Command cancelled in queue.'));
+
             return;
         }
 
@@ -341,7 +360,7 @@ final class AsyncConnection implements ConnectionInterface
         }
 
         $command = $this->commandQueue->dequeue();
-        if (!$command instanceof CommandRequest) {
+        if (! $command instanceof CommandRequest) {
             return;
         }
 
@@ -360,20 +379,24 @@ final class AsyncConnection implements ConnectionInterface
     private function startReadLoop(): void
     {
         $stdout = $this->stdout;
-        if ($stdout === null) return;
+        if ($stdout === null) {
+            return;
+        }
 
         async(function () use ($stdout): void {
             try {
                 while (null !== ($line = await($stdout->readLineAsync()))) {
                     $line = \trim($line);
-                    if ($line === '') continue;
+                    if ($line === '') {
+                        continue;
+                    }
 
                     $response = \json_decode($line, true);
 
-                    if (!\is_array($response)) {
+                    if (! \is_array($response)) {
                         throw new ConnectionException(
-                            "Invalid JSON received from SQLite worker: " . \json_last_error_msg() .
-                                " | Payload: " . \substr($line, 0, 200)
+                            'Invalid JSON received from SQLite worker: ' . \json_last_error_msg() .
+                                ' | Payload: ' . \substr($line, 0, 200)
                         );
                     }
 
@@ -406,7 +429,9 @@ final class AsyncConnection implements ConnectionInterface
 
     public function handleCrash(\Throwable $e): void
     {
-        if ($this->closed) return;
+        if ($this->closed) {
+            return;
+        }
 
         $this->closed = true;
 
@@ -449,7 +474,7 @@ final class AsyncConnection implements ConnectionInterface
     private function removeFromQueue(CommandRequest $request): bool
     {
         $found = false;
-        
+
         /** @var SplQueue<CommandRequest> $temp */
         $temp = new SplQueue();
 

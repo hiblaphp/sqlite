@@ -25,7 +25,9 @@ final class SystemHelper
     /**
      * Disable instantiation.
      */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
     /**
      * Detects the path to the active PHP binary executable with cross-platform fallback.
@@ -201,7 +203,7 @@ final class SystemHelper
         $requiredFunctions = ['proc_open', 'exec', 'shell_exec'];
 
         foreach ($requiredFunctions as $function) {
-            if (!\function_exists($function)) {
+            if (! \function_exists($function)) {
                 return false;
             }
         }
