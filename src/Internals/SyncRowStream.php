@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Hibla\Sqlite\Internals;
 
+use Hibla\Promise\Exceptions\CancelledException;
+use Hibla\Promise\Interfaces\PromiseInterface;
+use Hibla\Promise\Promise;
 use Hibla\Sql\RowStream as RowStreamInterface;
 
 /**
@@ -18,6 +21,11 @@ final class SyncRowStream implements RowStreamInterface
      */
     private array $columnNames = [];
 
+    /**
+     * @var Promise<void>
+     */
+    private readonly Promise $closePromise;
+
     public function __construct(
         private readonly \SQLite3Result $result
     ) {
@@ -25,6 +33,10 @@ final class SyncRowStream implements RowStreamInterface
         for ($i = 0; $i < $cols; $i++) {
             $this->columnNames[] = $this->result->columnName($i);
         }
+
+        /** @var Promise<void> $closePromise */
+        $closePromise = new Promise();
+        $this->closePromise = $closePromise;
     }
 
     public int $columnCount {
@@ -32,10 +44,23 @@ final class SyncRowStream implements RowStreamInterface
     }
 
     /**
-     * @var array<int, string>
+     * {@inheritDoc}
      */
     public array $columns {
         get => $this->columnNames;
+    }
+
+    /**
+     * Returns a promise that resolves when the stream is fully consumed or cancelled.
+     * Used by the client to know when it is safe to release the connection.
+     * 
+     * @internal
+     * 
+     * @return PromiseInterface<void>
+     */
+    public function onClose(): PromiseInterface
+    {
+        return $this->closePromise;
     }
 
     /**
@@ -51,6 +76,10 @@ final class SyncRowStream implements RowStreamInterface
 
         if (! $this->cancelled) {
             $this->result->finalize();
+            
+            if ($this->closePromise->isPending()) {
+                $this->closePromise->resolve(null);
+            }
         }
     }
 
@@ -65,6 +94,10 @@ final class SyncRowStream implements RowStreamInterface
 
         $this->cancelled = true;
         @$this->result->finalize();
+
+        if ($this->closePromise->isPending()) {
+            $this->closePromise->reject(new CancelledException('Stream was cancelled.'));
+        }
     }
 
     /**
