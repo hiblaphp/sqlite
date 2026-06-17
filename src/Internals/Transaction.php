@@ -87,8 +87,7 @@ final class Transaction implements TransactionInterface
         if (\count($params) === 0) {
             $promise = $this->connection->streamQuery($sql, $bufferSize);
             $tracked = $this->trackErrorState($promise)->then(function (RowStreamInterface $stream): RowStreamInterface {
-                if (\method_exists($stream, 'onClose')) {
-                    /** @var PromiseInterface<mixed> $closePromise */
+                if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
                     $closePromise = $stream->onClose();
                     $closePromise->catch(function (): void {
                         $this->failed = true;
@@ -107,8 +106,7 @@ final class Transaction implements TransactionInterface
                 [$stmt, $isCached] = $result;
 
                 $innerPromise = $stmt->executeStream($params, $bufferSize)->then(function (RowStreamInterface $stream) use ($stmt, $isCached): RowStreamInterface {
-                    if (\method_exists($stream, 'onClose')) {
-                        /** @var PromiseInterface<mixed> $closePromise */
+                    if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
                         $closePromise = $stream->onClose();
                         $closePromise->catch(function (): void {
                             $this->failed = true;

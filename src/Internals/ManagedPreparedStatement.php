@@ -45,9 +45,9 @@ final class ManagedPreparedStatement implements PreparedStatementInterface
      * 
      * @return PromiseInterface<RowStreamInterface>
      */
-    public function executeStream(array $params = []): PromiseInterface
+    public function executeStream(array $params = [], int $bufferSize = 100): PromiseInterface
     {
-        $promise = $this->statement->executeStream($params);
+        $promise = $this->statement->executeStream($params, $bufferSize);
 
         return Promise::propagateCancellation($promise);
     }

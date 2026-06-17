@@ -47,17 +47,16 @@ final class TransactionPreparedStatement implements PreparedStatementInterface
      * 
      * @return PromiseInterface<RowStreamInterface>
      */
-    public function executeStream(array $params = []): PromiseInterface
+    public function executeStream(array $params = [], int $bufferSize = 100): PromiseInterface
     {
-        $promise = $this->statement->executeStream($params);
+        $promise = $this->statement->executeStream($params, $bufferSize);
 
         if ($this->onStreamError !== null) {
             $onStreamError = $this->onStreamError;
 
             $promise = $promise->then(
                 function (RowStreamInterface $stream) use ($onStreamError): RowStreamInterface {
-                    if (\method_exists($stream, 'onClose')) {
-                        /** @var PromiseInterface<mixed> $closePromise */
+                    if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
                         $closePromise = $stream->onClose();
                         $closePromise->catch(static function () use ($onStreamError): void {
                             $onStreamError();

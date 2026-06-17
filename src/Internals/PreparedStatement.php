@@ -62,7 +62,7 @@ final class PreparedStatement implements PreparedStatementInterface
      *
      * @return PromiseInterface<\Hibla\Sql\RowStream>
      */
-    public function executeStream(array $params = []): PromiseInterface
+    public function executeStream(array $params = [], int $bufferSize = 100): PromiseInterface
     {
         if ($this->isClosed) {
             throw new PreparedException('Cannot execute a closed prepared statement.');
@@ -74,7 +74,7 @@ final class PreparedStatement implements PreparedStatementInterface
             return Promise::rejected($e);
         }
 
-        return $this->connection->executeStream($this, $normalizedParams);
+        return $this->connection->executeStream($this, $normalizedParams, $bufferSize);
     }
 
     /**
