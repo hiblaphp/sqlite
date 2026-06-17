@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Hibla\Sqlite\Internals;
 
-use Hibla\Sql\Result as ResultInterface;
+use Hibla\Sqlite\Interfaces\SqliteResult;
 
 /**
  * Unified result object for SQLite query executions.
  *
  * @internal
  */
-final class Result implements ResultInterface
+final class Result implements SqliteResult
 {
     public readonly int $rowCount;
 
@@ -27,11 +27,13 @@ final class Result implements ResultInterface
     /**
      * @param int $affectedRows The number of rows affected by an INSERT/UPDATE/DELETE statement.
      * @param int $lastInsertId The last inserted row ID.
+     * @param int $connectionId The unique ID of the connection that executed this query.
      * @param array<int, array<string, mixed>> $rows The fetched rows.
      */
     public function __construct(
         public readonly int $affectedRows = 0,
         public readonly int $lastInsertId = 0,
+        public readonly int $connectionId = 0,
         private readonly array $rows = []
     ) {
         $this->rowCount = \count($this->rows);
