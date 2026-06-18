@@ -436,7 +436,7 @@ final class AsyncConnection implements ConnectionInterface
                     }
 
                     if ($this->paused && $this->pausePromise !== null) {
-                        await($this->paused ? $this->pausePromise : Promise::resolved(null));
+                        await($this->pausePromise);
                     }
                 }
             } catch (\Throwable $e) {

@@ -53,7 +53,8 @@ final class SyncConnection implements ConnectionInterface
      */
     public function query(string $sql): PromiseInterface
     {
-        if ($this->closed || $this->db === null) {
+        $db = $this->db;
+        if ($this->closed || $db === null) {
             return Promise::rejected(ExceptionMapper::map(0, 'Connection closed.'));
         }
 
@@ -65,7 +66,7 @@ final class SyncConnection implements ConnectionInterface
 
             $rows = [];
             if ($returnsRows) {
-                $result = $this->db->query($sql);
+                $result = $db->query($sql);
                 if ($result !== false) {
                     while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
                         $rows[] = $row;
@@ -73,12 +74,12 @@ final class SyncConnection implements ConnectionInterface
                     $result->finalize();
                 }
             } else {
-                $this->db->exec($sql);
+                $db->exec($sql);
             }
 
             return Promise::resolved(new Result(
-                affectedRows: $this->db->changes(),
-                lastInsertId: $this->db->lastInsertRowID(),
+                affectedRows: $db->changes(),
+                lastInsertId: $db->lastInsertRowID(),
                 connectionId: spl_object_id($this),
                 rows: $rows
             ));
@@ -94,12 +95,13 @@ final class SyncConnection implements ConnectionInterface
      */
     public function streamQuery(string $sql, int $bufferSize = 100): PromiseInterface
     {
-        if ($this->closed || $this->db === null) {
+        $db = $this->db;
+        if ($this->closed || $db === null) {
             return Promise::rejected(ExceptionMapper::map(0, 'Connection closed.'));
         }
 
         try {
-            $result = $this->db->query($sql);
+            $result = $db->query($sql);
             if ($result === false) {
                 throw new \RuntimeException('Query failed.');
             }
@@ -127,12 +129,13 @@ final class SyncConnection implements ConnectionInterface
      */
     public function executeStatement(PreparedStatement $stmt, array $params): PromiseInterface
     {
-        if ($this->closed || $this->db === null) {
+        $db = $this->db;
+        if ($this->closed || $db === null) {
             return Promise::rejected(ExceptionMapper::map(0, 'Connection closed.'));
         }
 
         try {
-            $sqliteStmt = $this->db->prepare($stmt->parsedSql);
+            $sqliteStmt = $db->prepare($stmt->parsedSql);
             if ($sqliteStmt === false) {
                 throw new \RuntimeException('Failed to prepare statement.');
             }
@@ -150,8 +153,8 @@ final class SyncConnection implements ConnectionInterface
             $sqliteStmt->close();
 
             return Promise::resolved(new Result(
-                affectedRows: $this->db->changes(),
-                lastInsertId: $this->db->lastInsertRowID(),
+                affectedRows: $db->changes(),
+                lastInsertId: $db->lastInsertRowID(),
                 connectionId: spl_object_id($this),
                 rows: $rows
             ));
@@ -167,12 +170,13 @@ final class SyncConnection implements ConnectionInterface
      */
     public function executeStream(PreparedStatement $stmt, array $params, int $bufferSize = 100): PromiseInterface
     {
-        if ($this->closed || $this->db === null) {
+        $db = $this->db;
+        if ($this->closed || $db === null) {
             return Promise::rejected(ExceptionMapper::map(0, 'Connection closed.'));
         }
 
         try {
-            $sqliteStmt = $this->db->prepare($stmt->parsedSql);
+            $sqliteStmt = $db->prepare($stmt->parsedSql);
             if ($sqliteStmt === false) {
                 throw new \RuntimeException('Failed to prepare statement.');
             }

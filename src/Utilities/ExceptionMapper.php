@@ -33,7 +33,7 @@ final class ExceptionMapper
             self::SQLITE_LOCKED,
             self::SQLITE_BUSY_SNAPSHOT,
             self::SQLITE_LOCKED_SHAREDCACHE => new DeadlockException($message, $code),
-            
+
             self::SQLITE_BUSY => new LockWaitTimeoutException($message, $code),
             default => new QueryException($message, $code),
         };
