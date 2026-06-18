@@ -14,17 +14,15 @@ use function Hibla\delay;
 
 describe('AsyncConnection - Streaming Cancellation', function () {
 
-    it('cancels a queued stream before it starts executing (Tier 1)', function () {
+    it('cancels a queued stream promise before it starts executing (Tier 1)', function () {
         $conn = sqliteConn(['force_sync' => false]);
 
         try {
             $slowPromise = $conn->query(slowCteQuery());
-
             $stream = await($conn->streamQuery(streamCancelQuery(), 10));
 
             if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
-                $stream->onClose()->catch(function (Throwable $e): void {
-                    // caught
+                $stream->onClose()->catch(function (\Throwable $e): void {
                 });
             }
 
@@ -33,8 +31,38 @@ describe('AsyncConnection - Streaming Cancellation', function () {
 
             expect($stream->isCancelled())->toBeTrue();
             expect(fn () => iterator_to_array($stream))->toThrow(CancelledException::class);
+
             $result = await($conn->query('SELECT 42 AS val'));
             expect($result->fetchOne()['val'])->toBe(42);
+        } finally {
+            $conn->close();
+        }
+    });
+
+    it('cancels a queued prepared statement stream before it starts executing (Tier 1)', function () {
+        $conn = sqliteConn(['force_sync' => false]);
+
+        try {
+            $slowPromise = $conn->query(slowCteQuery());
+            
+            $stmt = await($conn->prepare(streamCancelQuery()));
+            $stream = await($conn->executeStream($stmt, [], 10));
+
+            if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
+                $stream->onClose()->catch(function (\Throwable $e): void {
+                });
+            }
+
+            $stream->cancel();
+            await($slowPromise);
+
+            expect($stream->isCancelled())->toBeTrue();
+            expect(fn () => iterator_to_array($stream))->toThrow(CancelledException::class);
+
+            await($stmt->close());
+
+            $result = await($conn->query('SELECT 42 AS val'));
+            expect($result->fetchOne()['ok'])->toBe(42);
         } finally {
             $conn->close();
         }
@@ -48,7 +76,7 @@ describe('AsyncConnection - Streaming Cancellation', function () {
             expect($stream)->toBeInstanceOf(RowStreamInterface::class);
 
             if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
-                $stream->onClose()->catch(function (Throwable $e): void {
+                $stream->onClose()->catch(function (\Throwable $e): void {
                 });
             }
 
@@ -75,7 +103,7 @@ describe('AsyncConnection - Streaming Cancellation', function () {
             expect($stream)->toBeInstanceOf(RowStreamInterface::class);
 
             if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
-                $stream->onClose()->catch(function (Throwable $e): void {
+                $stream->onClose()->catch(function (\Throwable $e): void {
                 });
             }
 
@@ -121,7 +149,7 @@ describe('AsyncConnection - Streaming Cancellation', function () {
             $stream = await($conn->streamQuery(streamCancelQuery(), 10));
 
             if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
-                $stream->onClose()->catch(function (Throwable $e): void {
+                $stream->onClose()->catch(function (\Throwable $e): void {
                 });
             }
 
@@ -157,9 +185,9 @@ describe('AsyncConnection - Streaming Cancellation', function () {
             $stmt = await($conn->prepare('SELECT ? AS val'));
 
             $stream = await($conn->executeStream($stmt, [100], 10));
-
+            
             if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
-                $stream->onClose()->catch(function (Throwable $e): void {
+                $stream->onClose()->catch(function (\Throwable $e): void {
                 });
             }
 
@@ -218,9 +246,44 @@ describe('SyncConnection - Streaming Cancellation', function (): void {
             }
 
             expect($count)->toBe(2)
-                ->and($threw)->toBeTrue() 
+                ->and($threw)->toBeTrue()
                 ->and($stream->isCancelled())->toBeTrue()
             ;
+        } finally {
+            $conn->close();
+        }
+    });
+
+    it('cancels a prepared statement stream mid-iteration on SyncConnection', function (): void {
+        $conn = sqliteConn(['force_sync' => true]);
+
+        try {
+            $stmt = await($conn->prepare('SELECT ? AS val UNION ALL SELECT ? AS val'));
+            $stream = await($conn->executeStream($stmt, [100, 200]));
+
+            if ($stream instanceof SqliteRowStream || $stream instanceof SyncRowStream) {
+                $stream->onClose()->catch(function (\Throwable $e): void {
+                });
+            }
+
+            $count = 0;
+            $threw = false;
+
+            try {
+                foreach ($stream as $row) {
+                    $count++;
+                    $stream->cancel();
+                }
+            } catch (CancelledException $e) {
+                $threw = true;
+            }
+
+            expect($count)->toBe(1)
+                ->and($threw)->toBeTrue()
+                ->and($stream->isCancelled())->toBeTrue()
+            ;
+
+            await($stmt->close());
         } finally {
             $conn->close();
         }
