@@ -83,6 +83,7 @@ final class PoolManager
 
     /**
      * @param (callable(ConnectionSetupInterface): (PromiseInterface<mixed>|void))|null $onConnect
+     * @param bool $deleteDatabaseOnShutdown Whether to delete the physical database file upon pool close.
      */
     public function __construct(
         private readonly SqliteConfig $config,
@@ -93,6 +94,7 @@ final class PoolManager
         private readonly int $maxWaiters = 0,
         private readonly float $acquireTimeout = 0.0,
         ?callable $onConnect = null,
+        private readonly bool $deleteDatabaseOnShutdown = false,
     ) {
         if ($this->maxSize <= 0) {
             throw new \InvalidArgumentException('Pool max size must be greater than 0');
@@ -144,6 +146,7 @@ final class PoolManager
                 'config_validated' => $this->configValidated,
                 'tracked_connections' => \count($this->connectionCreatedAt),
                 'is_graceful_shutdown' => $this->isGracefulShutdown,
+                'delete_database_on_shutdown' => $this->deleteDatabaseOnShutdown,
             ];
         }
     }
@@ -363,6 +366,8 @@ final class PoolManager
         $this->activeConnections = 0;
         $this->connectionLastUsed = [];
         $this->connectionCreatedAt = [];
+
+        $this->cleanupDatabaseFiles();
     }
 
     /**
@@ -450,6 +455,8 @@ final class PoolManager
 
         $this->connectionLastUsed = [];
         $this->connectionCreatedAt = [];
+
+        $this->cleanupDatabaseFiles();
 
         if ($this->shutdownPromise !== null && $this->shutdownPromise->isPending()) {
             $this->shutdownPromise->resolve(null);
@@ -707,6 +714,26 @@ final class PoolManager
         }
 
         $this->checkShutdownComplete();
+    }
+
+    /**
+     * Deletes the physical database and companion files if deleteDatabaseOnShutdown is enabled.
+     */
+    private function cleanupDatabaseFiles(): void
+    {
+        if (! $this->deleteDatabaseOnShutdown) {
+            return;
+        }
+
+        $dbFile = $this->config->database;
+
+        if ($dbFile === ':memory:' || $dbFile === '') {
+            return;
+        }
+
+        @\unlink($dbFile);
+        @\unlink($dbFile . '-wal');
+        @\unlink($dbFile . '-shm');
     }
 
     public function __destruct()
