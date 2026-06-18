@@ -107,7 +107,7 @@ describe('PoolManager - Basic Acquisition and Release', function (): void {
         $conn = await($pool->get());
         $pool->close();
 
-        expect(fn() => $pool->release($conn))->not->toThrow(Throwable::class);
+        expect(fn () => $pool->release($conn))->not->toThrow(Throwable::class);
         expect($conn->isClosed())->toBeTrue();
     });
 });
@@ -145,8 +145,9 @@ describe('PoolManager - Pool Size Enforcement', function (): void {
             $conn = await($pool->get());
             $waiter1 = $pool->get();
 
-            expect(fn() => await($pool->get()))
-                ->toThrow(PoolException::class, 'Connection pool exhausted. Max waiters limit (1) reached.');
+            expect(fn () => await($pool->get()))
+                ->toThrow(PoolException::class, 'Connection pool exhausted. Max waiters limit (1) reached.')
+            ;
 
             $pool->release($conn);
             $conn2 = await($waiter1);
@@ -210,8 +211,9 @@ describe('PoolManager - Waiter Timeouts', function (): void {
         try {
             $conn = await($pool->get());
 
-            expect(fn() => await($pool->get()))
-                ->toThrow(TimeoutException::class);
+            expect(fn () => await($pool->get()))
+                ->toThrow(TimeoutException::class)
+            ;
 
             $pool->release($conn);
         } finally {
@@ -226,7 +228,7 @@ describe('PoolManager - Waiter Timeouts', function (): void {
             $conn = await($pool->get());
             $waiter = $pool->get();
 
-            Loop::addTimer(0.05, fn() => $pool->release($conn));
+            Loop::addTimer(0.05, fn () => $pool->release($conn));
 
             $conn2 = await($waiter);
             expect($conn2->isClosed())->toBeFalse();
@@ -343,13 +345,13 @@ describe('PoolManager - Connection Reset Hooks', function (): void {
         $attempts = 0;
         $pool = makePool([
             'maxSize' => 1,
-            'resetConnection' => true,
+            'reset_connection' => true,
             'onConnect' => function () use (&$attempts) {
                 $attempts++;
                 if ($attempts === 2) {
                     throw new RuntimeException('Simulated setup failure during reset');
                 }
-            }
+            },
         ]);
 
         try {
