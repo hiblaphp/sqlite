@@ -62,7 +62,7 @@ describe('AsyncConnection - Streaming Cancellation', function () {
             await($stmt->close());
 
             $result = await($conn->query('SELECT 42 AS val'));
-            expect($result->fetchOne()['ok'])->toBe(42);
+            expect($result->fetchOne()['val'])->toBe(42); 
         } finally {
             $conn->close();
         }
