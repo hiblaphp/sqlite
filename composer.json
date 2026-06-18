@@ -21,16 +21,19 @@
     },
     "require-dev": {
         "laravel/pint": "^1.0",
+        "pestphp/pest": "^4.0",
         "phpstan/phpstan": "^2.0",
         "phpstan/phpstan-strict-rules": "^2.0",
         "phpstan/extension-installer": "^1.0"
     },
     "config": {
         "allow-plugins": {
-            "phpstan/extension-installer": true
+            "phpstan/extension-installer": true,
+            "pestphp/pest-plugin": true
         }
     },
     "scripts": {
+        "test": "php vendor/bin/pest",
         "analyze": "php vendor/bin/phpstan analyze",
         "format": "php vendor/bin/pint"
     }
