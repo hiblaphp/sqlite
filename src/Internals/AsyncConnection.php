@@ -353,8 +353,12 @@ class AsyncConnection implements ConnectionInterface
         }
     }
 
-    private function processNextCommand(): void
+   private function processNextCommand(): void
     {
+        if ($this->currentCommand !== null) {
+            return;
+        }
+
         if ($this->commandQueue->isEmpty()) {
             return;
         }
