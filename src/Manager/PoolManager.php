@@ -211,8 +211,7 @@ final class PoolManager
 
             $waiterPromise->finally(static function () use ($timerId): void {
                 Loop::cancelTimer($timerId);
-            })->catch(static function (): void {
-            });
+            })->catch(static function (): void {});
         }
 
         $this->waiters->enqueue($waiterPromise);
@@ -328,8 +327,7 @@ final class PoolManager
 
             $pendingShutdown->finally(static function () use ($timerId): void {
                 Loop::cancelTimer($timerId);
-            })->catch(static function (): void {
-            });
+            })->catch(static function (): void {});
         }
 
         /** @var PromiseInterface<void> */
@@ -497,15 +495,14 @@ final class PoolManager
                         $this->pool->enqueue($connection);
                     }
                 },
-                function (Throwable $e): void {
-                }
+                function (Throwable $e): void {}
             );
         }
     }
 
     /**
-       * @return PromiseInterface<ConnectionInterface>
-       */
+     * @return PromiseInterface<ConnectionInterface>
+     */
     private function runOnConnectHook(ConnectionInterface $connection): PromiseInterface
     {
         if ($this->onConnect === null) {
@@ -514,19 +511,24 @@ final class PoolManager
 
         $setup = new ConnectionSetup($connection);
 
-        try {
-            return async(function () use ($setup, $connection) {
+        /** @var Promise<ConnectionInterface> $promise */
+        $promise = new Promise();
+
+        async(function () use ($setup, $connection, $promise) {
+            try {
                 $result = ($this->onConnect)($setup);
 
                 if ($result instanceof PromiseInterface) {
                     await($result);
                 }
 
-                return $connection;
-            });
-        } catch (Throwable $e) {
-            return Promise::rejected($e);
-        }
+                $promise->resolve($connection);
+            } catch (Throwable $e) {
+                $promise->reject($e);
+            }
+        });
+
+        return $promise;
     }
 
     private function resetAndRelease(ConnectionInterface $connection): void
@@ -755,7 +757,7 @@ final class PoolManager
                 continue;
             }
 
-            for ($attempt = 0; $attempt < 10; $attempt++) {
+            for ($attempt = 0; $attempt < 50; $attempt++) {
                 if (@\unlink($file)) {
                     break;
                 }

@@ -19,8 +19,11 @@ final class StateResetter
      */
     public static function execute(\SQLite3 $db, SqliteConfig $config): void
     {
-        // Abort any hanging transactions
-        @$db->exec('ROLLBACK');
+        try {
+            @$db->exec('ROLLBACK');
+        } catch (\Throwable $e) {
+            // Ignore "no transaction is active" errors
+        }
 
         // Drop all Temporary Tables and Views
         $drops = [];
