@@ -103,9 +103,10 @@ class AsyncConnection implements ConnectionInterface
                     \escapeshellarg($configSerialized)
                 );
 
+                // Route STDERR directly to the parent's stderr on Linux so worker crashes are visible in CI
                 $descriptorSpec = PHP_OS_FAMILY === 'Windows'
                     ? [0 => ['socket'], 1 => ['socket'], 2 => ['socket']]
-                    : [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+                    : [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', 'php://stderr', 'a']];
 
                 $options = PHP_OS_FAMILY === 'Windows' ? ['bypass_shell' => true] : [];
 
@@ -120,7 +121,9 @@ class AsyncConnection implements ConnectionInterface
 
                 \stream_set_blocking($pipes[0], false);
                 \stream_set_blocking($pipes[1], false);
-                \stream_set_blocking($pipes[2], false);
+                if (isset($pipes[2])) {
+                    \stream_set_blocking($pipes[2], false);
+                }
 
                 $this->stdin = new PromiseWritableStream($pipes[0]);
                 $this->stdout = new PromiseReadableStream($pipes[1]);
@@ -255,7 +258,7 @@ class AsyncConnection implements ConnectionInterface
         }
 
         /** @var PromiseInterface<bool> */
-        return $this->query('SELECT 1')->then(static fn() => true);
+        return $this->query('SELECT 1')->then(static fn () => true);
     }
 
     /**
@@ -270,7 +273,7 @@ class AsyncConnection implements ConnectionInterface
         }
 
         return $this->enqueueCommand(CommandRequest::TYPE_RESET, '')
-            ->then(static fn() => true);
+            ->then(static fn () => true);
     }
 
     /**
@@ -451,8 +454,6 @@ class AsyncConnection implements ConnectionInterface
 
     public function handleCrash(\Throwable $e): void
     {
-        fwrite(STDERR, "[AsyncConnection] handleCrash triggered: " . $e->getMessage() . " | isClosed: " . ($this->closed ? 'true' : 'false') . "\n");
-
         if ($this->closed) {
             return;
         }
@@ -483,12 +484,12 @@ class AsyncConnection implements ConnectionInterface
         }
 
         if ($this->currentCommand !== null) {
-            fwrite(STDERR, "[AsyncConnection] currentCommand is active. isSettled: " . ($this->currentCommand->promise->isSettled() ? 'true' : 'false') . "\n");
-
             if ($this->currentCommand->streamContext !== null) {
                 $this->currentCommand->streamContext->error($e);
             }
-            $this->currentCommand->promise->reject($e);
+            if (! $this->currentCommand->promise->isSettled()) {
+                $this->currentCommand->promise->reject($e);
+            }
             $this->currentCommand = null;
         }
 
@@ -500,7 +501,9 @@ class AsyncConnection implements ConnectionInterface
         while (! $this->commandQueue->isEmpty()) {
             $cmd = $this->commandQueue->dequeue();
             if ($cmd instanceof CommandRequest) {
-                $cmd->promise->reject($e);
+                if (! $cmd->promise->isSettled()) {
+                    $cmd->promise->reject($e);
+                }
             }
         }
     }
