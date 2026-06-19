@@ -40,4 +40,4 @@ jobs:
         run: composer analyze
 
       - name: Run Tests
-        run: composer test
+        run: vendor/bin/pest --compact
