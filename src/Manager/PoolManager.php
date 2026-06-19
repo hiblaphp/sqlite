@@ -211,7 +211,8 @@ final class PoolManager
 
             $waiterPromise->finally(static function () use ($timerId): void {
                 Loop::cancelTimer($timerId);
-            })->catch(static function (): void {});
+            })->catch(static function (): void {
+            });
         }
 
         $this->waiters->enqueue($waiterPromise);
@@ -327,7 +328,8 @@ final class PoolManager
 
             $pendingShutdown->finally(static function () use ($timerId): void {
                 Loop::cancelTimer($timerId);
-            })->catch(static function (): void {});
+            })->catch(static function (): void {
+            });
         }
 
         /** @var PromiseInterface<void> */
@@ -356,6 +358,14 @@ final class PoolManager
                 $connection->close(true);
             }
         }
+
+        foreach ($this->drainingConnections as $connection) {
+            if (! $connection->isClosed()) {
+                $connection->close(true);
+            }
+        }
+
+        $this->drainingConnections = [];
 
         while (! $this->waiters->isEmpty()) {
             $promise = $this->waiters->dequeue();
@@ -495,7 +505,8 @@ final class PoolManager
                         $this->pool->enqueue($connection);
                     }
                 },
-                function (Throwable $e): void {}
+                function (Throwable $e): void {
+                }
             );
         }
     }

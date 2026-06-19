@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use function Hibla\await;
 use function Hibla\delay;
 
@@ -59,14 +61,16 @@ describe('PoolManager - Connection Reset', function (): void {
             $conn2 = await($pool->get());
 
             $exception = null;
+
             try {
                 await($conn2->query('SELECT * FROM reset_test'));
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 $exception = $e;
             }
 
             expect($exception)->not->toBeNull()
-                ->and($exception->getMessage())->toContain('no such table: reset_test');
+                ->and($exception->getMessage())->toContain('no such table: reset_test')
+            ;
 
             $pool->release($conn2);
         } finally {
@@ -96,14 +100,16 @@ describe('PoolManager - Connection Reset', function (): void {
             $conn2 = await($pool->get());
 
             $exception = null;
+
             try {
                 await($conn2->query('SELECT * FROM reset_test_sync'));
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 $exception = $e;
             }
 
             expect($exception)->not->toBeNull()
-                ->and($exception->getMessage())->toContain('no such table: reset_test_sync');
+                ->and($exception->getMessage())->toContain('no such table: reset_test_sync')
+            ;
 
             $pool->release($conn2);
         } finally {

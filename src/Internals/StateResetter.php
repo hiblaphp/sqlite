@@ -31,9 +31,13 @@ final class StateResetter
 
         if ($tempSchema !== false) {
             while ($row = $tempSchema->fetchArray(SQLITE3_ASSOC)) {
-                $type = strtoupper($row['type']);
-                $name = $row['name'];
-                $drops[] = "DROP {$type} temp.\"{$name}\"";
+                $rawType = $row['type'] ?? null;
+                $rawName = $row['name'] ?? null;
+
+                if (\is_string($rawType) && \is_string($rawName)) {
+                    $type = strtoupper($rawType);
+                    $drops[] = "DROP {$type} temp.\"{$rawName}\"";
+                }
             }
             $tempSchema->finalize();
         }

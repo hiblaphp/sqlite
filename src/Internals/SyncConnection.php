@@ -185,6 +185,10 @@ class SyncConnection implements ConnectionInterface
             $this->bindParams($sqliteStmt, $params);
             $result = $sqliteStmt->execute();
 
+            if ($result === false) {
+                throw new \RuntimeException('Failed to execute prepared statement stream.');
+            }
+
             return Promise::resolved(new SyncRowStream($result));
         } catch (\Throwable $e) {
             return Promise::rejected(ExceptionMapper::map((int) $e->getCode(), $e->getMessage()));

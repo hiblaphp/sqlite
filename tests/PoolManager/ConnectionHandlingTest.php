@@ -377,6 +377,93 @@ describe('PoolManager - Connection Reset', function (): void {
             $pool->close();
         }
     });
+
+    it('clears temporary tables and session state when resetConnection is enabled (Async)', function (): void {
+        $pool = makePool([
+            'maxSize' => 1,
+            'force_sync' => false,
+            'reset_connection' => true,
+        ]);
+
+        try {
+            $conn1 = await($pool->get());
+
+            await($conn1->query('CREATE TEMP TABLE reset_test (id INT)'));
+            await($conn1->query('INSERT INTO reset_test VALUES (1)'));
+            await($conn1->query('PRAGMA foreign_keys = OFF'));
+
+            $pool->release($conn1);
+            await(delay(0.1));
+
+            $conn2 = await($pool->get());
+            expect(spl_object_id($conn2))->toBe(spl_object_id($conn1));
+
+            $pragmaResult = await($conn2->query('PRAGMA foreign_keys'));
+            expect((int)$pragmaResult->fetchOne()['foreign_keys'])->toBe(1);
+
+            $exception = null;
+
+            try {
+                await($conn2->query('SELECT * FROM reset_test'));
+            } catch (Throwable $e) {
+                $exception = $e;
+            }
+
+            expect($exception)->not->toBeNull()
+                ->and($exception->getMessage())->toContain('no such table: reset_test')
+            ;
+
+            $pool->release($conn2);
+        } finally {
+            $conn1 = null;
+            $conn2 = null;
+            gc_collect_cycles();
+            $pool->close();
+        }
+    });
+
+    it('clears temporary tables and session state when resetConnection is enabled (Sync)', function (): void {
+        $pool = makePool([
+            'maxSize' => 1,
+            'force_sync' => true,
+            'reset_connection' => true,
+        ]);
+
+        try {
+            $conn1 = await($pool->get());
+
+            await($conn1->query('CREATE TEMP TABLE reset_test_sync (id INT)'));
+            await($conn1->query('INSERT INTO reset_test_sync VALUES (99)'));
+            await($conn1->query('PRAGMA foreign_keys = OFF'));
+
+            $pool->release($conn1);
+
+            $conn2 = await($pool->get());
+            expect(spl_object_id($conn2))->toBe(spl_object_id($conn1));
+
+            $pragmaResult = await($conn2->query('PRAGMA foreign_keys'));
+            expect((int)$pragmaResult->fetchOne()['foreign_keys'])->toBe(1);
+
+            $exception = null;
+
+            try {
+                await($conn2->query('SELECT * FROM reset_test_sync'));
+            } catch (Throwable $e) {
+                $exception = $e;
+            }
+
+            expect($exception)->not->toBeNull()
+                ->and($exception->getMessage())->toContain('no such table: reset_test_sync')
+            ;
+
+            $pool->release($conn2);
+        } finally {
+            $conn1 = null;
+            $conn2 = null;
+            gc_collect_cycles();
+            $pool->close();
+        }
+    });
 });
 
 describe('PoolManager - Graceful and Force Shutdowns', function (): void {
