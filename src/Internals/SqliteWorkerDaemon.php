@@ -20,8 +20,7 @@ final class SqliteWorkerDaemon
 
     public function __construct(
         private readonly SqliteConfig $config
-    ) {
-    }
+    ) {}
 
     public function __invoke(): void
     {
@@ -56,11 +55,15 @@ final class SqliteWorkerDaemon
         $requestCount = 0;
         $memoryLimitBytes = $this->config->memoryLimitMB * 1024 * 1024;
 
+        fwrite(STDERR, "[WORKER {$this->config->database}] Entering read loop...\n");
+
         while (($line = fgets($stdin)) !== false) {
             $line = trim($line);
             if ($line === '') {
                 continue;
             }
+
+            fwrite(STDERR, "[WORKER] Received line: " . substr($line, 0, 50) . "...\n");
 
             $request = json_decode($line, true);
             if (! \is_array($request)) {
@@ -79,19 +82,13 @@ final class SqliteWorkerDaemon
                     case 'query':
                     case 'execute':
                         $queryHandler->handle($request);
-
                         break;
-
                     case 'stream':
                         $streamHandler->handle($request);
-
                         break;
-
                     case 'reset':
                         $resetHandler->handle($request);
-
                         break;
-
                     default:
                         throw new \RuntimeException('Unknown command: ' . $cmd);
                 }
@@ -99,22 +96,18 @@ final class SqliteWorkerDaemon
                 $this->writeError($id, $e, $stdout);
             }
 
-            // Enterprise Stability: Memory Management
             $requestCount++;
-
-            //  Run GC every 1,000 queries to clean up cyclic references
             if ($requestCount % 1000 === 0) {
                 gc_collect_cycles();
-
-                // Self-healing check: If memory bloats unexpectedly, exit cleanly.
-                // The parent AsyncConnection will detect the closed pipe, mark the connection
-                // as closed, and the PoolManager will transparently spawn a fresh worker.
                 if (memory_get_usage() > $memoryLimitBytes) {
+                    fwrite(STDERR, "[WORKER] Memory limit exceeded, exiting naturally.\n");
                     $this->db->close();
                     exit(0);
                 }
             }
         }
+
+        fwrite(STDERR, "[WORKER] Exited read loop! feof(stdin): " . (feof($stdin) ? 'true' : 'false') . "\n");
     }
 
     /**

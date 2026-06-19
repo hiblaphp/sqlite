@@ -255,7 +255,7 @@ class AsyncConnection implements ConnectionInterface
         }
 
         /** @var PromiseInterface<bool> */
-        return $this->query('SELECT 1')->then(static fn () => true);
+        return $this->query('SELECT 1')->then(static fn() => true);
     }
 
     /**
@@ -270,7 +270,7 @@ class AsyncConnection implements ConnectionInterface
         }
 
         return $this->enqueueCommand(CommandRequest::TYPE_RESET, '')
-            ->then(static fn () => true);
+            ->then(static fn() => true);
     }
 
     /**
@@ -451,6 +451,8 @@ class AsyncConnection implements ConnectionInterface
 
     public function handleCrash(\Throwable $e): void
     {
+        fwrite(STDERR, "[AsyncConnection] handleCrash triggered: " . $e->getMessage() . " | isClosed: " . ($this->closed ? 'true' : 'false') . "\n");
+
         if ($this->closed) {
             return;
         }
@@ -481,6 +483,8 @@ class AsyncConnection implements ConnectionInterface
         }
 
         if ($this->currentCommand !== null) {
+            fwrite(STDERR, "[AsyncConnection] currentCommand is active. isSettled: " . ($this->currentCommand->promise->isSettled() ? 'true' : 'false') . "\n");
+
             if ($this->currentCommand->streamContext !== null) {
                 $this->currentCommand->streamContext->error($e);
             }
