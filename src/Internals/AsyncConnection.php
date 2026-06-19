@@ -273,7 +273,8 @@ class AsyncConnection implements ConnectionInterface
         }
 
         return $this->enqueueCommand(CommandRequest::TYPE_RESET, '')
-            ->then(static fn () => true);
+            ->then(static fn () => true)
+        ;
     }
 
     /**

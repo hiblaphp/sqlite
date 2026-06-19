@@ -70,6 +70,7 @@ final class SqliteWorkerDaemon
 
         while (true) {
             $initAttempts++;
+
             try {
                 $this->db = new \SQLite3($this->config->database);
                 $this->db->enableExceptions(true);
@@ -88,6 +89,7 @@ final class SqliteWorkerDaemon
                         @$this->db->close();
                     }
                     usleep(50000);
+
                     continue;
                 }
 
@@ -122,12 +124,15 @@ final class SqliteWorkerDaemon
                 case 'query':
                 case 'execute':
                     $queryHandler->handle($request);
+
                     break;
                 case 'stream':
                     $streamHandler->handle($request);
+
                     break;
                 case 'reset':
                     $resetHandler->handle($request);
+
                     break;
                 default:
                     throw new \RuntimeException('Unknown command: ' . $cmd);
@@ -144,7 +149,7 @@ final class SqliteWorkerDaemon
     {
         if ($requestCount % 1000 === 0) {
             gc_collect_cycles();
-            
+
             if (memory_get_usage() > $memoryLimitBytes) {
                 $this->db->close();
                 exit(0);
@@ -153,8 +158,6 @@ final class SqliteWorkerDaemon
     }
 
     /**
-     * Writes a JSON-encoded status frame back to the parent process.
-     * 
      * @param resource $stdout
      * @param array<string, mixed> $data
      */
@@ -166,8 +169,8 @@ final class SqliteWorkerDaemon
 
         try {
             $payload = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
-            fwrite($stdout, $payload);
-            fflush($stdout);
+            @fwrite($stdout, $payload);
+            @fflush($stdout);
         } catch (\JsonException $e) {
             $errorPayload = json_encode([
                 'id' => $data['id'] ?? 'unknown',
@@ -175,14 +178,14 @@ final class SqliteWorkerDaemon
                 'errorCode' => 0,
                 'errorMessage' => 'JSON Encoding Error in worker: ' . $e->getMessage(),
             ]) . "\n";
-            fwrite($stdout, $errorPayload);
-            fflush($stdout);
+            @fwrite($stdout, $errorPayload);
+            @fflush($stdout);
         }
     }
 
     /**
      * Broadcasts a fully structured exception trace to the parent process.
-     * 
+     *
      * @param resource|null $stdout
      */
     private function writeError(string $id, \Throwable $e, $stdout = null): void

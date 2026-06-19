@@ -23,7 +23,8 @@ final class JsonIpcFrameHandler
     public function __construct(
         private readonly AsyncConnection $connection,
         private readonly PromiseReadableStream $stdout
-    ) {}
+    ) {
+    }
 
     public function start(): void
     {

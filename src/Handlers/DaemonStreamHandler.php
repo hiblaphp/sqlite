@@ -33,24 +33,35 @@ final class DaemonStreamHandler extends AbstractDaemonHandler
         $this->bindParams($stmt, $params);
         $result = $stmt->execute();
 
+        $completed = true;
+
         if ($returnsRows && $result !== false) {
             while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-                $this->writeFrame([
+                $success = $this->writeFrame([
                     'id' => $id,
                     'status' => 'ROW',
                     'row' => $row,
                 ]);
+
+                // If writing fails, the parent cancelled/disconnected. Stop fetching immediately!
+                if (! $success) {
+                    $completed = false;
+
+                    break;
+                }
             }
         }
 
-        $this->writeFrame([
-            'id' => $id,
-            'status' => 'COMPLETED',
-            'result' => [
-                'affectedRows' => $this->db->changes(),
-                'lastInsertId' => $this->db->lastInsertRowID(),
-            ],
-        ]);
+        if ($completed) {
+            $this->writeFrame([
+                'id' => $id,
+                'status' => 'COMPLETED',
+                'result' => [
+                    'affectedRows' => $this->db->changes(),
+                    'lastInsertId' => $this->db->lastInsertRowID(),
+                ],
+            ]);
+        }
 
         if ($result !== false) {
             $result->finalize();

@@ -83,6 +83,7 @@ final class SyncRowStream implements RowStreamInterface
                     if ($this->cancelled) {
                         throw new CancelledException('Stream was cancelled.');
                     }
+
                     throw $e;
                 }
 

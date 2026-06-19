@@ -22,13 +22,17 @@ abstract class AbstractDaemonHandler
      * Writes a JSON-encoded status frame back to the parent process.
      *
      * @param array<string, mixed> $data
+     *
+     * @return bool True if writing succeeded, false if the pipe is broken.
      */
-    protected function writeFrame(array $data): void
+    protected function writeFrame(array $data): bool
     {
         try {
             $payload = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
-            fwrite($this->stdout, $payload);
-            fflush($this->stdout);
+            $written = @fwrite($this->stdout, $payload);
+            @fflush($this->stdout);
+
+            return $written !== false;
         } catch (\JsonException $e) {
             $errorPayload = json_encode([
                 'id' => $data['id'] ?? 'unknown',
@@ -36,8 +40,10 @@ abstract class AbstractDaemonHandler
                 'errorCode' => 0,
                 'errorMessage' => 'JSON Encoding Error in worker: ' . $e->getMessage(),
             ]) . "\n";
-            fwrite($this->stdout, $errorPayload);
-            fflush($this->stdout);
+            @fwrite($this->stdout, $errorPayload);
+            @fflush($this->stdout);
+
+            return false;
         }
     }
 
