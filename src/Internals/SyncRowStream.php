@@ -63,7 +63,7 @@ final class SyncRowStream implements RowStreamInterface
         return $this->closePromise;
     }
 
-   /**
+    /**
      * {@inheritDoc}
      *
      * @return \Generator<int, array<string, mixed>>
@@ -79,6 +79,7 @@ final class SyncRowStream implements RowStreamInterface
                 try {
                     $row = $this->result->fetchArray(SQLITE3_ASSOC);
                 } catch (\Throwable $e) {
+                    // @phpstan-ignore-next-line (The $this->cancelled state can be mutated asynchronously by other Fibers during the yield suspension)
                     if ($this->cancelled) {
                         throw new CancelledException('Stream was cancelled.');
                     }
