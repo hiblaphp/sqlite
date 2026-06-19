@@ -25,35 +25,7 @@ final class SqliteWorkerDaemon
 
     public function __invoke(): void
     {
-        $initAttempts = 0;
-        
-        while (true) {
-            $initAttempts++;
-            try {
-                $this->db = new \SQLite3($this->config->database);
-                $this->db->enableExceptions(true);
-
-                $this->db->busyTimeout($this->config->busyTimeout);
-                $this->db->exec("PRAGMA journal_mode = {$this->config->journalMode}");
-
-                $fkFlag = $this->config->foreignKeys ? 'ON' : 'OFF';
-                $this->db->exec("PRAGMA foreign_keys = {$fkFlag}");
-                
-                break; // Initialization successful
-            } catch (\Throwable $e) {
-                // Thundering herd protection: If workers collide creating the -wal/-shm files, back off and retry
-                if (str_contains($e->getMessage(), 'database is locked') && $initAttempts < 20) {
-                    if (isset($this->db)) {
-                        @$this->db->close();
-                    }
-                    usleep(50000);
-                    continue;
-                }
-
-                $this->writeError('init', $e);
-                exit(1);
-            }
-        }
+        $this->initializeDatabase();
 
         $stdin = fopen('php://stdin', 'r');
         $stdout = fopen('php://stdout', 'w');
@@ -83,45 +55,106 @@ final class SqliteWorkerDaemon
                 continue;
             }
 
-            $id = isset($request['id']) && \is_string($request['id']) ? $request['id'] : 'unknown';
-            $cmd = isset($request['cmd']) && \is_string($request['cmd']) ? $request['cmd'] : '';
+            $this->dispatchCommand($request, $stdout, $queryHandler, $streamHandler, $resetHandler);
 
-            if ($id === 'unknown' || $cmd === '') {
-                continue;
-            }
+            $this->manageMemory(++$requestCount, $memoryLimitBytes);
+        }
+    }
 
+    /**
+     * Connects to the database and sets necessary PRAGMAs, handling concurrent lock collisions.
+     */
+    private function initializeDatabase(): void
+    {
+        $initAttempts = 0;
+
+        while (true) {
+            $initAttempts++;
             try {
-                switch ($cmd) {
-                    case 'query':
-                    case 'execute':
-                        $queryHandler->handle($request);
-                        break;
-                    case 'stream':
-                        $streamHandler->handle($request);
-                        break;
-                    case 'reset':
-                        $resetHandler->handle($request);
-                        break;
-                    default:
-                        throw new \RuntimeException('Unknown command: ' . $cmd);
-                }
-            } catch (\Throwable $e) {
-                $this->writeError($id, $e, $stdout);
-            }
+                $this->db = new \SQLite3($this->config->database);
+                $this->db->enableExceptions(true);
 
-            // Enterprise Stability: Memory Management
-            $requestCount++;
-            if ($requestCount % 1000 === 0) {
-                gc_collect_cycles();
-                if (memory_get_usage() > $memoryLimitBytes) {
-                    $this->db->close();
-                    exit(0);
+                $this->db->busyTimeout($this->config->busyTimeout);
+                $this->db->exec("PRAGMA journal_mode = {$this->config->journalMode}");
+
+                $fkFlag = $this->config->foreignKeys ? 'ON' : 'OFF';
+                $this->db->exec("PRAGMA foreign_keys = {$fkFlag}");
+
+                break; // Initialization successful
+            } catch (\Throwable $e) {
+                // Thundering herd protection: If workers collide creating the -wal/-shm files, back off and retry
+                if (str_contains($e->getMessage(), 'database is locked') && $initAttempts < 20) {
+                    if (isset($this->db)) {
+                        @$this->db->close();
+                    }
+                    usleep(50000);
+                    continue;
                 }
+
+                $this->writeError('init', $e);
+                exit(1);
             }
         }
     }
 
     /**
+     * Routes the decoded JSON payload to the appropriate execution handler.
+     *
+     * @param array<int|string, mixed> $request
+     * @param resource $stdout
+     */
+    private function dispatchCommand(
+        array $request,
+        mixed $stdout,
+        DaemonQueryHandler $queryHandler,
+        DaemonStreamHandler $streamHandler,
+        DaemonResetHandler $resetHandler
+    ): void {
+        $id = isset($request['id']) && \is_string($request['id']) ? $request['id'] : 'unknown';
+        $cmd = isset($request['cmd']) && \is_string($request['cmd']) ? $request['cmd'] : '';
+
+        if ($id === 'unknown' || $cmd === '') {
+            return;
+        }
+
+        try {
+            switch ($cmd) {
+                case 'query':
+                case 'execute':
+                    $queryHandler->handle($request);
+                    break;
+                case 'stream':
+                    $streamHandler->handle($request);
+                    break;
+                case 'reset':
+                    $resetHandler->handle($request);
+                    break;
+                default:
+                    throw new \RuntimeException('Unknown command: ' . $cmd);
+            }
+        } catch (\Throwable $e) {
+            $this->writeError($id, $e, $stdout);
+        }
+    }
+
+    /**
+     * Periodically triggers garbage collection and restarts the daemon if memory bloats.
+     */
+    private function manageMemory(int $requestCount, int $memoryLimitBytes): void
+    {
+        if ($requestCount % 1000 === 0) {
+            gc_collect_cycles();
+            
+            if (memory_get_usage() > $memoryLimitBytes) {
+                $this->db->close();
+                exit(0);
+            }
+        }
+    }
+
+    /**
+     * Writes a JSON-encoded status frame back to the parent process.
+     * 
      * @param resource $stdout
      * @param array<string, mixed> $data
      */
@@ -148,6 +181,8 @@ final class SqliteWorkerDaemon
     }
 
     /**
+     * Broadcasts a fully structured exception trace to the parent process.
+     * 
      * @param resource|null $stdout
      */
     private function writeError(string $id, \Throwable $e, $stdout = null): void

@@ -71,15 +71,10 @@ final class JsonIpcFrameHandler
                     $this->connection->awaitPauseCheck();
                 }
             } catch (\Throwable $e) {
-                fwrite(STDERR, "[JsonIpcFrameHandler] Catch block hit: " . $e->getMessage() . "\n");
                 $this->connection->handleCrash(new ConnectionException('SQLite IPC pipe read loop failed.', 0, $e));
             } finally {
-                fwrite(STDERR, "[JsonIpcFrameHandler] Finally block hit: Stream closed.\n");
                 $this->connection->handleCrash(new ConnectionException('SQLite process stream closed.'));
             }
-        })->catch(function (\Throwable $e): void {
-            fwrite(STDERR, "[JsonIpcFrameHandler] Outer Catch block hit: " . $e->getMessage() . "\n");
-            // Ignore any errors that occur while the handler is running.
         });
     }
 }
