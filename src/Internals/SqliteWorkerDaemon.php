@@ -41,6 +41,7 @@ final class SqliteWorkerDaemon
                 
                 break; // Initialization successful
             } catch (\Throwable $e) {
+                // Thundering herd protection: If workers collide creating the -wal/-shm files, back off and retry
                 if (str_contains($e->getMessage(), 'database is locked') && $initAttempts < 20) {
                     if (isset($this->db)) {
                         @$this->db->close();
@@ -71,30 +72,7 @@ final class SqliteWorkerDaemon
         $requestCount = 0;
         $memoryLimitBytes = $this->config->memoryLimitMB * 1024 * 1024;
 
-        while (true) {
-            $read = [$stdin];
-            $write = null;
-            $except = null;
-
-            // Safely block until data is available, ignoring O_NONBLOCK interference from the parent
-            if (@stream_select($read, $write, $except, null) === false) {
-                break;
-            }
-
-            if (feof($stdin)) {
-                break;
-            }
-
-            $line = fgets($stdin);
-
-            if ($line === false) {
-                if (feof($stdin)) {
-                    break;
-                }
-                usleep(1000);
-                continue;
-            }
-
+        while (($line = fgets($stdin)) !== false) {
             $line = trim($line);
             if ($line === '') {
                 continue;
@@ -131,6 +109,7 @@ final class SqliteWorkerDaemon
                 $this->writeError($id, $e, $stdout);
             }
 
+            // Enterprise Stability: Memory Management
             $requestCount++;
             if ($requestCount % 1000 === 0) {
                 gc_collect_cycles();
