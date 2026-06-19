@@ -55,15 +55,34 @@ final class SqliteWorkerDaemon
         $requestCount = 0;
         $memoryLimitBytes = $this->config->memoryLimitMB * 1024 * 1024;
 
-        fwrite(STDERR, "[WORKER {$this->config->database}] Entering read loop...\n");
+        while (true) {
+            $read = [$stdin];
+            $write = null;
+            $except = null;
 
-        while (($line = fgets($stdin)) !== false) {
+            // Block indefinitely until there is data to read, immune to O_NONBLOCK OS interference
+            if (@stream_select($read, $write, $except, null) === false) {
+                break;
+            }
+
+            if (feof($stdin)) {
+                break;
+            }
+
+            $line = fgets($stdin);
+
+            if ($line === false) {
+                if (feof($stdin)) {
+                    break;
+                }
+                // Non-blocking false alarm, loop again
+                continue;
+            }
+
             $line = trim($line);
             if ($line === '') {
                 continue;
             }
-
-            fwrite(STDERR, "[WORKER] Received line: " . substr($line, 0, 50) . "...\n");
 
             $request = json_decode($line, true);
             if (! \is_array($request)) {
@@ -100,14 +119,11 @@ final class SqliteWorkerDaemon
             if ($requestCount % 1000 === 0) {
                 gc_collect_cycles();
                 if (memory_get_usage() > $memoryLimitBytes) {
-                    fwrite(STDERR, "[WORKER] Memory limit exceeded, exiting naturally.\n");
                     $this->db->close();
                     exit(0);
                 }
             }
         }
-
-        fwrite(STDERR, "[WORKER] Exited read loop! feof(stdin): " . (feof($stdin) ? 'true' : 'false') . "\n");
     }
 
     /**

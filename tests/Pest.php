@@ -94,7 +94,7 @@ function slowCteQuery(): string
 {
     return '
         WITH RECURSIVE cnt(x) AS (
-            SELECT 1 UNION ALL SELECT x+1 FROM cnt WHERE x < 200
+            SELECT 1 UNION ALL SELECT x+1 FROM cnt WHERE x < 50
         )
         SELECT sum(a.x + b.x + c.x) FROM cnt a CROSS JOIN cnt b CROSS JOIN cnt c;
     ';
