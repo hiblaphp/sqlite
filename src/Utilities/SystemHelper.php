@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Hibla\Sqlite\Utilities;
 
-use Hibla\Sql\Exceptions\ConnectionException;
-
 /**
  * @internal
  *

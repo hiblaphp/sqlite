@@ -50,6 +50,7 @@
 - [Making queries](#making-queries)
   - [Queries with parameters](#queries-with-parameters-prepared-statements)
   - [Convenience methods](#convenience-methods)
+  - [Custom Built-in Functions](#custom-built-in-functions)
 - [Prepared statements](#prepared-statements)
 - [Streaming results](#streaming-results)
 - [Transactions](#transactions)
@@ -306,6 +307,14 @@ $user = await($client->fetchOne('SELECT * FROM users WHERE id = ?', [$userId]));
 // Returns value of first column from first row
 $name = await($client->fetchValue('SELECT name FROM users WHERE id = ?', [$userId]));
 ```
+
+### Custom Built-in Functions
+
+Native SQLite lacks a sleep function, which makes testing timeouts and async concurrency difficult. The `SqliteClient` automatically injects a custom `sleep(seconds)` User-Defined Function (UDF) into every connection. It supports integer and floating-point seconds.
+
+```php
+// Pauses the background worker for 1.5 seconds without blocking the main event loop unless `forceSync` is enabled.
+await($client->query('SELECT sleep(1.5)'));
 
 ---
 

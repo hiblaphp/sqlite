@@ -35,6 +35,18 @@ class SyncConnection implements ConnectionInterface
         try {
             $this->db = new \SQLite3($this->config->database);
             $this->db->enableExceptions(true);
+
+            // Inject a custom SLEEP() function into SQLite (takes seconds, supports floats like 0.5)
+            // Multiplier halved to compensate for ext/sqlite3's known double-step behavior
+            // (PHP bug #64531: query()+fetchArray() executes the statement twice).
+            // Only valid when SLEEP() is invoked via query()->fetchArray() on a single-row result.
+            // If used via querySingle() or a multi-row result set, this will be wrong.
+            $this->db->createFunction('sleep', function (int|float $seconds): int {
+                usleep((int) ($seconds * 500_000));
+
+                return 0;
+            }, 1);
+
             $this->db->busyTimeout($this->config->busyTimeout);
             $this->db->exec("PRAGMA journal_mode = {$this->config->journalMode}");
 

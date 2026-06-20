@@ -83,10 +83,10 @@ final class PoolManager
      */
     private readonly mixed $onConnect;
 
-   /**
-     * @param (callable(ConnectionSetupInterface): (PromiseInterface<mixed>|void))|null $onConnect
-     * @param bool $deleteDatabaseOnShutdown Whether to delete the physical database file upon pool close.
-     */
+    /**
+       * @param (callable(ConnectionSetupInterface): (PromiseInterface<mixed>|void))|null $onConnect
+       * @param bool $deleteDatabaseOnShutdown Whether to delete the physical database file upon pool close.
+      */
     public function __construct(
         private readonly SqliteConfig $config,
         private readonly int $maxSize = 10,
