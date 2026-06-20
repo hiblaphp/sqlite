@@ -63,6 +63,8 @@ class AsyncConnection implements ConnectionInterface
 
     private readonly ConnectionResetHandler $resetHandler;
 
+    private ?JsonIpcFrameHandler $ipcHandler = null;
+
     /**
      * @param SqliteConfig|array<string, mixed>|string $config
      */
@@ -138,8 +140,7 @@ class AsyncConnection implements ConnectionInterface
                     throw new ConnectionException('Failed to retrieve STDOUT stream.');
                 }
 
-                $ipcHandler = new JsonIpcFrameHandler($this, $stdout);
-                $ipcHandler->start();
+                $this->ipcHandler = new JsonIpcFrameHandler($this, $stdout);
             } catch (\Throwable $e) {
                 $promise->reject(new ConnectionException('Failed to establish raw SQLite process connection.', 0, $e));
             }
@@ -258,7 +259,7 @@ class AsyncConnection implements ConnectionInterface
         }
 
         /** @var PromiseInterface<bool> */
-        return $this->query('SELECT 1')->then(static fn () => true);
+        return $this->query('SELECT 1')->then(static fn() => true);
     }
 
     /**
@@ -273,7 +274,7 @@ class AsyncConnection implements ConnectionInterface
         }
 
         return $this->enqueueCommand(CommandRequest::TYPE_RESET, '')
-            ->then(static fn () => true)
+            ->then(static fn() => true)
         ;
     }
 
@@ -415,6 +416,16 @@ class AsyncConnection implements ConnectionInterface
         } else {
             $this->queryHandler->start($command);
         }
+
+        $this->ipcHandler?->readLoop();
+    }
+
+    /**
+     * @internal
+     */
+    public function hasActiveCommand(): bool
+    {
+        return $this->currentCommand !== null;
     }
 
     /**

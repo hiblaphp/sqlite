@@ -20,61 +20,78 @@ use function Hibla\await;
  */
 final class JsonIpcFrameHandler
 {
+    private bool $isReading = false;
+
+    private string $buffer = '';
+
     public function __construct(
         private readonly AsyncConnection $connection,
         private readonly PromiseReadableStream $stdout
     ) {
     }
 
-    public function start(): void
+    /**
+     * Starts the read loop if it isn't already running.
+     * The loop will automatically terminate when the connection has no active commands,
+     * freeing the event loop and allowing PHP to shut down naturally.
+     */
+    public function readLoop(): void
     {
+        if ($this->isReading) {
+            return;
+        }
+
+        $this->isReading = true;
+
         async(function (): void {
-            /** @var string $buffer */
-            $buffer = '';
-
             try {
-                while (null !== ($line = await($this->stdout->readLineAsync()))) {
-                    $buffer .= $line;
+                // Only read from the stream when there is an actual command pending
+                while ($this->connection->hasActiveCommand()) {
 
-                    if (trim($buffer) === '') {
-                        $buffer = '';
+                    // Handles stream backpressure safely between valid frames
+                    $this->connection->awaitPauseCheck();
+
+                    $line = await($this->stdout->readLineAsync());
+
+                    if ($line === null) {
+                        throw new ConnectionException('SQLite process stream closed unexpectedly.');
+                    }
+
+                    $this->buffer .= $line;
+
+                    if (trim($this->buffer) === '') {
+                        $this->buffer = '';
 
                         continue;
                     }
 
-                    $response = \json_decode($buffer, true);
+                    $response = \json_decode($this->buffer, true);
 
                     if (\is_array($response)) {
                         // Successful decode: clear the buffer for the next frame
-                        $buffer = '';
+                        $this->buffer = '';
 
                         /** @var array<string, mixed> $response */
                         $this->connection->handleIpcFrame($response);
                     } else {
                         // If decoding fails, it might be a truncated chunk OR malformed garbage.
                         $isCompleteLine = str_ends_with($line, "\n") || str_ends_with($line, "\r");
-                        $ltrimmed = ltrim($buffer);
+                        $ltrimmed = ltrim($this->buffer);
 
                         if ($ltrimmed !== '' && $ltrimmed[0] !== '{') {
                             // Valid frames ALWAYS start with '{'. If not, it's non-JSON pollution
-                            $buffer = '';
+                            $this->buffer = '';
                         } elseif ($isCompleteLine) {
                             // Started with '{' but reached the end of the line and still failed to decode.
                             // It's a completely malformed JSON string -> Discard.
-                            $buffer = '';
+                            $this->buffer = '';
                         }
-
-                        // Otherwise, it starts with '{' but no newline yet -> Truncated chunk. Keep buffering.
-                        continue;
                     }
-
-                    // Handles stream backpressure safely between valid frames
-                    $this->connection->awaitPauseCheck();
                 }
             } catch (\Throwable $e) {
                 $this->connection->handleCrash(new ConnectionException('SQLite IPC pipe read loop failed.', 0, $e));
             } finally {
-                $this->connection->handleCrash(new ConnectionException('SQLite process stream closed.'));
+                $this->isReading = false;
             }
         });
     }
