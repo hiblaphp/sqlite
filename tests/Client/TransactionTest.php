@@ -79,7 +79,7 @@ describe('Transaction - Manual Basics', function (): void {
             await($tx->commit());
 
             expect(fn () => await($tx->query('SELECT 1')))
-                ->toThrow(TransactionException::class, 'Transaction is no longer active')
+                ->toThrow(TransactionException::class, 'Cannot perform operation: transaction is no longer active')
             ;
         } finally {
             $client->close();
@@ -270,7 +270,7 @@ describe('Transaction - Strict Tainting', function (): void {
             }
 
             expect(fn () => await($tx->query('SELECT 1')))
-                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error')
+                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error. Call rollback() to abort, or use savepoints to recover from expected failures.')
             ;
 
             await($tx->rollback());
@@ -291,7 +291,7 @@ describe('Transaction - Strict Tainting', function (): void {
             }
 
             expect(fn () => await($tx->commit()))
-                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous error')
+                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error. Call rollback() to abort, or use savepoints to recover from expected failures.')
             ;
 
             expect(fn () => await($tx->rollback()))->not->toThrow(Throwable::class);
@@ -420,7 +420,7 @@ describe('Transaction - Event Hooks', function (): void {
 
 describe('Transaction - Lifecycle & GC', function (): void {
 
-   });
+});
 it('automatically rolls back and releases connection when the Transaction is garbage collected', function (): void {
     $client = makeClient(['maxConnections' => 1]);
 

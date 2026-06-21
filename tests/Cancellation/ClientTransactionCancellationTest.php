@@ -31,11 +31,11 @@ describe('Transaction Cancellation - Manual Transactions', function () {
             expect(fn () => await($promise))->toThrow(CancelledException::class);
 
             expect(fn () => await($tx->query('SELECT 1')))
-                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error')
+                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error. Call rollback() to abort, or use savepoints to recover from expected failures.')
             ;
 
             expect(fn () => await($tx->commit()))
-                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous error')
+                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error. Call rollback() to abort, or use savepoints to recover from expected failures.')
             ;
 
             await($tx->rollback());
@@ -63,7 +63,7 @@ describe('Transaction Cancellation - Manual Transactions', function () {
             expect(fn () => await($promise))->toThrow(CancelledException::class);
 
             expect(fn () => await($tx->query('SELECT 1')))
-                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error')
+                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error. Call rollback() to abort, or use savepoints to recover from expected failures.')
             ;
 
             await($stmt->close());
@@ -101,7 +101,7 @@ describe('Transaction Cancellation - Manual Transactions', function () {
             ;
 
             expect(fn () => await($tx->query('SELECT 1')))
-                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error')
+                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error. Call rollback() to abort, or use savepoints to recover from expected failures.')
             ;
 
             await($tx->rollback());
@@ -152,14 +152,8 @@ describe('Transaction Cancellation - Edge Cases', function () {
 
         try {
             $tx = await($client->beginTransaction());
-
-            // Send a slow query to occupy the connection
             $slow = $tx->query(slowCteQuery());
-
-            // Queue a fast query directly behind it
             $queued = $tx->query('SELECT 1');
-
-            // Cancel the queued one before it ever reaches the worker
             $queued->cancel();
 
             try {
@@ -169,9 +163,8 @@ describe('Transaction Cancellation - Edge Cases', function () {
 
             expect($queued->isCancelled())->toBeTrue();
 
-            // The transaction MUST still be tainted, because a query belonging to it failed/cancelled
             expect(fn () => await($tx->commit()))
-                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous error')
+                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error. Call rollback() to abort, or use savepoints to recover from expected failures.')
             ;
 
             await($tx->rollback());
@@ -230,7 +223,7 @@ describe('Transaction Cancellation - Edge Cases', function () {
             });
 
             expect(fn () => await($wrapperPromise))
-                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous error')
+                ->toThrow(TransactionException::class, 'Transaction aborted due to a previous query error. Call rollback() to abort, or use savepoints to recover from expected failures.')
             ;
         } finally {
             $client->close();

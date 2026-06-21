@@ -261,7 +261,12 @@ final class Transaction implements TransactionInterface
         $this->ensureActive();
 
         if ($this->failed) {
-            return Promise::rejected(new TransactionException('Transaction aborted due to a previous error. Call rollback() to abort.'));
+            return Promise::rejected(
+                new TransactionException(
+                    'Transaction aborted due to a previous query error. '
+                        . 'Call rollback() to abort, or use savepoints to recover from expected failures.'
+                )
+            );
         }
 
         $promise = $this->connection->query('COMMIT')->then(
@@ -319,14 +324,15 @@ final class Transaction implements TransactionInterface
     }
 
     /**
-     * {@inheritDoc}
-     */
+         * {@inheritDoc}
+         */
     public function savepoint(string $identifier): PromiseInterface
     {
         $this->ensureActiveAndNotFailed();
+        $escaped = $this->escapeIdentifier($identifier);
 
         return Promise::propagateCancellation(
-            $this->trackErrorState($this->connection->query("SAVEPOINT `{$identifier}`"))
+            $this->trackErrorState($this->connection->query("SAVEPOINT {$escaped}"))
                 ->then(function (): void {
                 })
         );
@@ -338,10 +344,11 @@ final class Transaction implements TransactionInterface
     public function rollbackTo(string $identifier): PromiseInterface
     {
         $this->ensureActive();
+        $escaped = $this->escapeIdentifier($identifier);
 
         $this->failed = false;
 
-        $promise = $this->connection->query("ROLLBACK TO SAVEPOINT `{$identifier}`")
+        $promise = $this->connection->query("ROLLBACK TO SAVEPOINT {$escaped}")
             ->then(function (): void {
             })
             ->catch(function (\Throwable $e) {
@@ -360,9 +367,10 @@ final class Transaction implements TransactionInterface
     public function releaseSavepoint(string $identifier): PromiseInterface
     {
         $this->ensureActiveAndNotFailed();
+        $escaped = $this->escapeIdentifier($identifier);
 
         return Promise::propagateCancellation(
-            $this->trackErrorState($this->connection->query("RELEASE SAVEPOINT `{$identifier}`"))
+            $this->trackErrorState($this->connection->query("RELEASE SAVEPOINT {$escaped}"))
                 ->then(function (): void {
                 })
         );
@@ -450,10 +458,10 @@ final class Transaction implements TransactionInterface
     private function ensureActive(): void
     {
         if ($this->connection->isClosed()) {
-            throw new TransactionException('Connection is closed');
+            throw new TransactionException('Cannot perform operation: connection is closed');
         }
         if (! $this->active) {
-            throw new TransactionException('Transaction is no longer active');
+            throw new TransactionException('Cannot perform operation: transaction is no longer active');
         }
     }
 
@@ -461,10 +469,42 @@ final class Transaction implements TransactionInterface
     {
         $this->ensureActive();
         if ($this->failed) {
-            throw new TransactionException('Transaction aborted due to a previous query error. Call rollback() to abort.');
+            throw new TransactionException(
+                'Transaction aborted due to a previous query error. '
+                    . 'Call rollback() to abort, or use savepoints to recover from expected failures.'
+            );
         }
     }
 
+    private function escapeIdentifier(string $identifier): string
+    {
+        if ($identifier === '') {
+            throw new \InvalidArgumentException('Savepoint identifier cannot be empty');
+        }
+
+        if (\strlen($identifier) > 64) {
+            throw new \InvalidArgumentException('Savepoint identifier too long (max 64 characters)');
+        }
+
+        if (strpos($identifier, "\0") !== false || strpos($identifier, "\xFF") !== false) {
+            throw new \InvalidArgumentException('Savepoint identifier contains invalid byte values');
+        }
+
+        if ($identifier !== trim($identifier)) {
+            throw new \InvalidArgumentException('Savepoint identifier cannot start or end with spaces');
+        }
+
+        return '`' . str_replace('`', '``', $identifier) . '`';
+    }
+
+    /**
+     * Destructor ensures the connection is released safely.
+     *
+     * If the transaction was not explicitly committed or rolled back (e.g. an exception
+     * was thrown and the variable went out of scope), it issues an asynchronous
+     * fire-and-forget ROLLBACK to clear the session state before returning the
+     * connection to the pool.
+     */
     public function __destruct()
     {
         if ($this->active && ! $this->connection->isClosed() && ! $this->released) {
