@@ -7,6 +7,7 @@ namespace Hibla\Sqlite\Internals;
 use Hibla\Cache\ArrayCache;
 use Hibla\Promise\Interfaces\PromiseInterface;
 use Hibla\Promise\Promise;
+use Hibla\Sql\DatabaseDriver;
 use Hibla\Sql\Exceptions\TransactionException;
 use Hibla\Sql\Result as ResultInterface;
 use Hibla\Sql\RowStream as RowStreamInterface;
@@ -40,12 +41,18 @@ final class Transaction implements TransactionInterface
 
     private bool $failed = false;
 
+    /**
+     * @inheritdoc
+     */
+    public DatabaseDriver $driver {
+        get => DatabaseDriver::Sqlite;
+    }
+
     public function __construct(
         private readonly ConnectionInterface $connection,
         private readonly PoolManager $pool,
         private readonly ?ArrayCache $statementCache = null
-    ) {
-    }
+    ) {}
 
     /**
      * {@inheritDoc}
@@ -75,8 +82,7 @@ final class Transaction implements TransactionInterface
                 });
 
                 return $innerPromise;
-            })
-        ;
+            });
 
         Promise::forwardCancellation($promise, $innerPromise);
 
@@ -108,7 +114,7 @@ final class Transaction implements TransactionInterface
                     }
 
                     $closePromise = $stream->onClose();
-                    $closePromise->catch(static fn () => null);
+                    $closePromise->catch(static fn() => null);
                     $closePromise->catch(function (): void {
                         $this->failed = true;
                     });
@@ -147,12 +153,10 @@ final class Transaction implements TransactionInterface
                         }
 
                         return $stream;
-                    })
-                ;
+                    });
 
                 return $innerPromise;
-            })
-        ;
+            });
 
         Promise::forwardCancellation($promise, $innerPromise);
 
@@ -172,7 +176,7 @@ final class Transaction implements TransactionInterface
         };
 
         $promise = $innerPromise->then(
-            fn ($stmt) => new TransactionPreparedStatement($stmt, $this->connection, $onStreamError)
+            fn($stmt) => new TransactionPreparedStatement($stmt, $this->connection, $onStreamError)
         );
 
         Promise::forwardCancellation($promise, $innerPromise);
@@ -186,7 +190,7 @@ final class Transaction implements TransactionInterface
     public function execute(string $sql, array $params = []): PromiseInterface
     {
         return Promise::propagateCancellation(
-            $this->query($sql, $params)->then(fn (ResultInterface $r) => $r->affectedRows)
+            $this->query($sql, $params)->then(fn(ResultInterface $r) => $r->affectedRows)
         );
     }
 
@@ -196,7 +200,7 @@ final class Transaction implements TransactionInterface
     public function executeGetId(string $sql, array $params = []): PromiseInterface
     {
         return Promise::propagateCancellation(
-            $this->query($sql, $params)->then(fn (ResultInterface $r) => $r->lastInsertId)
+            $this->query($sql, $params)->then(fn(ResultInterface $r) => $r->lastInsertId)
         );
     }
 
@@ -206,7 +210,7 @@ final class Transaction implements TransactionInterface
     public function fetchOne(string $sql, array $params = []): PromiseInterface
     {
         return Promise::propagateCancellation(
-            $this->query($sql, $params)->then(fn (ResultInterface $r) => $r->fetchOne())
+            $this->query($sql, $params)->then(fn(ResultInterface $r) => $r->fetchOne())
         );
     }
 
@@ -324,8 +328,8 @@ final class Transaction implements TransactionInterface
     }
 
     /**
-         * {@inheritDoc}
-         */
+     * {@inheritDoc}
+     */
     public function savepoint(string $identifier): PromiseInterface
     {
         $this->ensureActiveAndNotFailed();
@@ -333,8 +337,7 @@ final class Transaction implements TransactionInterface
 
         return Promise::propagateCancellation(
             $this->trackErrorState($this->connection->query("SAVEPOINT {$escaped}"))
-                ->then(function (): void {
-                })
+                ->then(function (): void {})
         );
     }
 
@@ -349,14 +352,12 @@ final class Transaction implements TransactionInterface
         $this->failed = false;
 
         $promise = $this->connection->query("ROLLBACK TO SAVEPOINT {$escaped}")
-            ->then(function (): void {
-            })
+            ->then(function (): void {})
             ->catch(function (\Throwable $e) {
                 $this->failed = true;
 
                 throw $e;
-            })
-        ;
+            });
 
         return Promise::propagateCancellation($promise);
     }
@@ -371,8 +372,7 @@ final class Transaction implements TransactionInterface
 
         return Promise::propagateCancellation(
             $this->trackErrorState($this->connection->query("RELEASE SAVEPOINT {$escaped}"))
-                ->then(function (): void {
-                })
+                ->then(function (): void {})
         );
     }
 
@@ -428,7 +428,7 @@ final class Transaction implements TransactionInterface
     private function getCachedStatement(string $sql): PromiseInterface
     {
         if ($this->statementCache === null) {
-            return $this->connection->prepare($sql)->then(fn ($stmt) => [$stmt, false]);
+            return $this->connection->prepare($sql)->then(fn($stmt) => [$stmt, false]);
         }
 
         return $this->statementCache->get($sql)->then(function (mixed $stmt) use ($sql) {
